@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { 
+import { useState, useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
+import {
   TrendingUp, 
   ShoppingBag, 
   AlertTriangle, 
@@ -11,8 +12,13 @@ import {
   Activity,
   Calendar,
   Target,
-  Zap
+  Zap,
+  Download,
+  ChevronDown
 } from 'lucide-react';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
+import axiosInstance from '../utils/axiosInstance';
 import { useDashboardStore } from '../stores/dashboardStore';
 import { 
   Chart as ChartJS, 
@@ -88,10 +94,136 @@ const DashboardPage = () => {
   const { settings } = useAuthStore();
   const isDarkMode = settings.general.theme === 'dark';
   const [selectedDashboard, setSelectedDashboard] = useState('overview');
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const dashboardContentRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     loadDashboardData();
   }, [loadDashboardData]);
+
+  const handleDownloadStoreExcel = async () => {
+    setIsExporting(true);
+    setDownloadOpen(false);
+    try {
+      const res = await axiosInstance.get('/api/reports/dashboard/export-bootstrap/', {
+        responseType: 'blob',
+      });
+      const blob = new Blob(
+        [res.data],
+        { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }
+      );
+      const fileUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateTag = new Date().toISOString().slice(0, 10);
+      a.href = fileUrl;
+      a.download = `store_bootstrap_live_${dateTag}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(fileUrl);
+    } catch (err) {
+      console.error('Failed to download store excel export', err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleDownloadDashboardSnapshot = async () => {
+    setIsExporting(true);
+    setDownloadOpen(false);
+    try {
+      if (!dashboardContentRef.current) return;
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 8;
+      const imgWidth = pageWidth - margin * 2;
+      const sectionY = 16;
+      const tabDefs = [
+        { id: 'overview', title: 'Overview' },
+        { id: 'sales', title: 'Sales Analytics' },
+        { id: 'inventory', title: 'Inventory' },
+        { id: 'customers', title: 'Customers' },
+        { id: 'performance', title: 'Performance' },
+        { id: 'trends', title: 'Trends' },
+      ];
+      const previousTab = selectedDashboard;
+      let firstSection = true;
+
+      const waitForTabPaint = async (tabId: string) => {
+        const start = Date.now();
+        while (Date.now() - start < 2200) {
+          const root = dashboardContentRef.current;
+          const active = root?.getAttribute('data-active-tab') === tabId;
+          if (active) {
+            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            await new Promise((resolve) => setTimeout(resolve, 220));
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 70));
+        }
+      };
+
+      const addCanvasPages = (canvas: HTMLCanvasElement, title: string) => {
+        const imgData = canvas.toDataURL('image/png');
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        const firstPageUsable = pageHeight - sectionY - margin;
+        const continuationUsable = pageHeight - margin * 2;
+
+        let heightLeft = imgHeight;
+        let yPos = sectionY;
+
+        if (!firstSection) {
+          pdf.addPage();
+        }
+        firstSection = false;
+        pdf.setFont('helvetica', 'bold');
+        pdf.setTextColor(20, 20, 20);
+        pdf.setFontSize(11);
+        pdf.text(`Analytics Dashboard - ${title}`, margin, 10);
+        pdf.addImage(imgData, 'PNG', margin, yPos, imgWidth, imgHeight);
+        heightLeft -= firstPageUsable;
+
+        while (heightLeft > 0) {
+          pdf.addPage();
+          yPos = margin - (imgHeight - heightLeft);
+          pdf.addImage(imgData, 'PNG', margin, yPos, imgWidth, imgHeight);
+          heightLeft -= continuationUsable;
+        }
+      };
+
+      for (const tab of tabDefs) {
+        flushSync(() => {
+          setSelectedDashboard(tab.id);
+        });
+        await waitForTabPaint(tab.id);
+        if (!dashboardContentRef.current) continue;
+
+        window.scrollTo({ top: 0, behavior: 'auto' });
+
+        const canvas = await html2canvas(dashboardContentRef.current, {
+          scale: Math.min(2, Math.max(1.4, window.devicePixelRatio || 1.6)),
+          useCORS: true,
+          backgroundColor: null,
+          scrollY: -window.scrollY,
+          logging: false,
+        });
+        addCanvasPages(canvas, tab.title);
+      }
+
+      flushSync(() => {
+        setSelectedDashboard(previousTab);
+      });
+
+      const dateTag = new Date().toISOString().slice(0, 10);
+      pdf.save(`dashboard_snapshot_all_tabs_${dateTag}.pdf`);
+    } catch (err) {
+      console.error('Failed to export dashboard snapshot PDF', err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   if (isLoading || !dashboardData) {
     return (
@@ -227,8 +359,29 @@ const DashboardPage = () => {
     ],
   };
 
+  const growthRate = Number((dashboardData as any).trendMetrics?.growthRate || 0);
+  const growthTrend = {
+    value: `${growthRate >= 0 ? '+' : ''}${growthRate.toFixed(1)}% vs previous period`,
+    isPositive: growthRate >= 0,
+  };
+  const performance = (dashboardData as any).performance || {};
+  const customerSummary = (dashboardData as any).customerSummary || {};
+  const customerTotal = Number(customerSummary.totalCustomers || 0);
+  const customerNew = Number(customerSummary.newCustomers || 0);
+  const customerActive = Number(customerSummary.activeCustomers || 0);
+  const customerInactive = Math.max(0, customerTotal - customerActive);
+  const customerVip = Math.min(customerTotal, Math.max(0, Math.round(customerTotal * 0.1)));
+  const customerRegular = Math.max(0, customerActive - customerVip);
+
+  const performanceBars = [
+    { label: 'Daily Target', value: Math.max(0, Math.min(100, Number(performance.dailyTarget || 0))), color: 'bg-green-500' },
+    { label: 'Monthly Target', value: Math.max(0, Math.min(100, Number(performance.monthlyTarget || 0))), color: 'bg-blue-500' },
+    { label: 'Profit Margin', value: Math.max(0, Math.min(100, Number(performance.profitMargin || 0))), color: 'bg-purple-500' },
+    { label: 'Efficiency Score', value: Math.max(0, Math.min(100, Number(performance.efficiencyScore || 0))), color: 'bg-orange-500' },
+  ];
+
   const renderOverviewDashboard = () => (
-    <div className="space-y-6">
+    <div ref={dashboardContentRef} data-dashboard-capture="true" data-active-tab={selectedDashboard} className="space-y-6">
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <DashboardCard 
@@ -244,7 +397,7 @@ const DashboardPage = () => {
           value={`₹${(dashboardData.salesSummary?.thisMonth || 0).toLocaleString('en-IN')}`} 
           icon={<ShoppingBag size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-secondary-500 to-secondary-600"
-          trend={{ value: "+12.5% from last month", isPositive: true }}
+          trend={growthTrend}
           subtitle="Monthly revenue"
         />
         <DashboardCard 
@@ -259,7 +412,7 @@ const DashboardPage = () => {
           value={((dashboardData as any).customerSummary?.activeCustomers || 0).toString()} 
           icon={<Users size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-purple-500 to-purple-600"
-          trend={{ value: "+8.1% this month", isPositive: true }}
+          trend={growthTrend}
           subtitle="Registered users"
         />
       </div>
@@ -306,6 +459,13 @@ const DashboardPage = () => {
               </tr>
             </thead>
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+              {!(dashboardData.recentSales || []).length && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+                    No recent transactions for selected range.
+                  </td>
+                </tr>
+              )}
               {(dashboardData.recentSales || []).map((sale) => (
                 <tr key={sale.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -343,7 +503,7 @@ const DashboardPage = () => {
           value={`₹${((dashboardData.salesSummary?.thisMonth || 0) as number).toLocaleString('en-IN')}`} 
           icon={<IndianRupee size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-green-500 to-green-600"
-          trend={{ value: "+15.3% vs last month", isPositive: true }}
+          trend={growthTrend}
         />
         <DashboardCard 
           title="Average Order Value" 
@@ -357,14 +517,14 @@ const DashboardPage = () => {
           value={Number((dashboardData as any).performance?.totalOrders || 0).toString()} 
           icon={<ShoppingBag size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-purple-500 to-purple-600"
-          trend={{ value: "+12.1% vs last month", isPositive: true }}
+          trend={growthTrend}
         />
         <DashboardCard 
           title="Conversion Rate" 
           value={`${Number((dashboardData as any).trendMetrics?.growthRate || 0).toFixed(1)}%`} 
           icon={<Zap size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-orange-500 to-orange-600"
-          trend={{ value: "+2.3% vs last month", isPositive: true }}
+          trend={growthTrend}
         />
       </div>
 
@@ -397,6 +557,11 @@ const DashboardPage = () => {
       <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
         <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Top Selling Products</h2>
         <div className="space-y-4">
+          {!(dashboardData.topProducts || []).length && (
+            <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg text-sm text-gray-500 dark:text-gray-400">
+              No top product data for selected range.
+            </div>
+          )}
           {(dashboardData.topProducts || []).map((product, index) => (
             <div key={index} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
               <div className="flex items-center">
@@ -454,14 +619,22 @@ const DashboardPage = () => {
         <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Inventory Status</h2>
           <div className="h-80">
-            <Pie data={inventoryStatusData} options={chartOptions} />
+            {Number((dashboardData.inventorySummary?.totalItems || 0)) > 0 ? (
+              <Pie data={inventoryStatusData} options={chartOptions} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">No inventory data</div>
+            )}
           </div>
         </div>
         
         <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Category Distribution</h2>
           <div className="h-80">
-            <Doughnut data={categoryPerformanceData} options={{...chartOptions, cutout: '50%'}} />
+            {categoryRows.length ? (
+              <Doughnut data={categoryPerformanceData} options={{...chartOptions, cutout: '50%'}} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">No category distribution data</div>
+            )}
           </div>
         </div>
       </div>
@@ -470,6 +643,11 @@ const DashboardPage = () => {
       <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
         <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Stock Alerts</h2>
         <div className="space-y-3">
+          {!((dashboardData as any).stockAlerts || []).length && (
+            <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg text-sm text-gray-500 dark:text-gray-400">
+              No stock alerts for selected range.
+            </div>
+          )}
           {((dashboardData as any).stockAlerts || []).slice(0, 6).map((alert: any, idx: number) => {
             const isOut = alert.status === 'out_of_stock';
             return (
@@ -512,28 +690,28 @@ const DashboardPage = () => {
           value={Number((dashboardData as any).customerSummary?.totalCustomers || 0).toString()} 
           icon={<Users size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-purple-500 to-purple-600"
-          trend={{ value: "+12.5% this month", isPositive: true }}
+          trend={growthTrend}
         />
         <DashboardCard 
           title="New Customers" 
           value={Number((dashboardData as any).customerSummary?.newCustomers || 0).toString()} 
           icon={<Users size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-green-500 to-green-600"
-          trend={{ value: "+8.3% vs last month", isPositive: true }}
+          trend={growthTrend}
         />
         <DashboardCard 
           title="Returning Customers" 
           value={Number((dashboardData as any).customerSummary?.activeCustomers || 0).toString()} 
           icon={<Users size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-blue-500 to-blue-600"
-          trend={{ value: "+15.2% vs last month", isPositive: true }}
+          trend={growthTrend}
         />
         <DashboardCard 
           title="Customer Lifetime Value" 
           value={`₹${Number((dashboardData as any).customerSummary?.customerLifetimeValue || 0).toLocaleString('en-IN')}`} 
           icon={<IndianRupee size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-orange-500 to-orange-600"
-          trend={{ value: "+5.8% vs last month", isPositive: true }}
+          trend={growthTrend}
         />
       </div>
 
@@ -556,7 +734,7 @@ const DashboardPage = () => {
             <Doughnut data={{
               labels: ['VIP', 'Regular', 'New', 'Inactive'],
               datasets: [{
-                data: [15, 45, 25, 15],
+                data: [customerVip, customerRegular, customerNew, customerInactive],
                 backgroundColor: [
                   'rgba(251, 191, 36, 0.8)',
                   'rgba(34, 197, 94, 0.8)',
@@ -573,19 +751,24 @@ const DashboardPage = () => {
       <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
         <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Top Customers</h2>
         <div className="space-y-4">
+          {!((dashboardData as any).topCustomers || []).length && (
+            <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg text-sm text-gray-500 dark:text-gray-400">
+              No top customer data for selected range.
+            </div>
+          )}
           {((dashboardData as any).topCustomers || []).slice(0, 10).map((customer: any, index: number) => (
             <div key={index} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
               <div className="flex items-center">
                 <div className="h-10 w-10 bg-primary-100 dark:bg-primary-900 rounded-full flex items-center justify-center text-primary-600 dark:text-primary-400 font-bold mr-4">
-                  {customer.name.charAt(0)}
+                  {(customer.name || '?').charAt(0)}
                 </div>
                 <div>
-                  <p className="font-medium text-gray-800 dark:text-gray-100">{customer.name}</p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">{customer.purchases} purchases</p>
+                  <p className="font-medium text-gray-800 dark:text-gray-100">{customer.name || 'Unnamed Customer'}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{Number(customer.purchases || 0)} purchases</p>
                 </div>
               </div>
               <div className="text-right">
-                <p className="font-semibold text-gray-800 dark:text-gray-100">₹{customer.amount.toLocaleString('en-IN')}</p>
+                <p className="font-semibold text-gray-800 dark:text-gray-100">₹{Number(customer.amount || 0).toLocaleString('en-IN')}</p>
               </div>
             </div>
           ))}
@@ -603,28 +786,28 @@ const DashboardPage = () => {
           value={`${Number((dashboardData as any).performance?.dailyTarget || 0).toFixed(0)}%`} 
           icon={<Target size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-green-500 to-green-600"
-          trend={{ value: "+5% vs yesterday", isPositive: true }}
+          trend={growthTrend}
         />
         <DashboardCard 
           title="Monthly Target" 
           value={`${Number((dashboardData as any).performance?.monthlyTarget || 0).toFixed(0)}%`} 
           icon={<Target size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-blue-500 to-blue-600"
-          trend={{ value: "+12% vs last month", isPositive: true }}
+          trend={growthTrend}
         />
         <DashboardCard 
           title="Profit Margin" 
           value={`${Number((dashboardData as any).performance?.profitMargin || 0).toFixed(1)}%`} 
           icon={<TrendingUp size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-purple-500 to-purple-600"
-          trend={{ value: "+2.1% vs last month", isPositive: true }}
+          trend={growthTrend}
         />
         <DashboardCard 
           title="Efficiency Score" 
           value={`${Number((dashboardData as any).performance?.efficiencyScore || 0).toFixed(0)}%`} 
           icon={<Activity size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-orange-500 to-orange-600"
-          trend={{ value: "+3.2% vs last month", isPositive: true }}
+          trend={growthTrend}
         />
       </div>
 
@@ -634,16 +817,16 @@ const DashboardPage = () => {
           <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Target vs Achievement</h2>
           <div className="h-80">
             <Bar data={{
-              labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+              labels: performanceBars.map((row) => row.label),
               datasets: [
                 {
                   label: 'Target',
-                  data: [100, 100, 100, 100],
+                  data: performanceBars.map(() => 100),
                   backgroundColor: 'rgba(156, 163, 175, 0.5)',
                 },
                 {
                   label: 'Achievement',
-                  data: [85, 92, 88, 95],
+                  data: performanceBars.map((row) => row.value),
                   backgroundColor: 'rgba(34, 197, 94, 0.8)',
                 },
               ],
@@ -654,45 +837,17 @@ const DashboardPage = () => {
         <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Performance Metrics</h2>
           <div className="space-y-6">
-            <div>
-              <div className="flex justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Sales Target</span>
-                <span className="text-sm text-gray-500 dark:text-gray-400">85%</span>
+            {performanceBars.map((row) => (
+              <div key={row.label}>
+                <div className="flex justify-between mb-2">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{row.label}</span>
+                  <span className="text-sm text-gray-500 dark:text-gray-400">{row.value.toFixed(1)}%</span>
+                </div>
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                  <div className={`${row.color} h-2 rounded-full`} style={{ width: `${row.value}%` }}></div>
+                </div>
               </div>
-              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                <div className="bg-green-500 h-2 rounded-full" style={{ width: '85%' }}></div>
-              </div>
-            </div>
-            
-            <div>
-              <div className="flex justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Customer Satisfaction</span>
-                <span className="text-sm text-gray-500 dark:text-gray-400">92%</span>
-              </div>
-              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                <div className="bg-blue-500 h-2 rounded-full" style={{ width: '92%' }}></div>
-              </div>
-            </div>
-            
-            <div>
-              <div className="flex justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Inventory Turnover</span>
-                <span className="text-sm text-gray-500 dark:text-gray-400">78%</span>
-              </div>
-              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                <div className="bg-purple-500 h-2 rounded-full" style={{ width: '78%' }}></div>
-              </div>
-            </div>
-            
-            <div>
-              <div className="flex justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Operational Efficiency</span>
-                <span className="text-sm text-gray-500 dark:text-gray-400">88%</span>
-              </div>
-              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                <div className="bg-orange-500 h-2 rounded-full" style={{ width: '88%' }}></div>
-              </div>
-            </div>
+            ))}
           </div>
         </div>
       </div>
@@ -708,28 +863,28 @@ const DashboardPage = () => {
           value={`${Number((dashboardData as any).trendMetrics?.growthRate || 0).toFixed(1)}%`} 
           icon={<TrendingUp size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-green-500 to-green-600"
-          trend={{ value: "+2.1% vs last quarter", isPositive: true }}
+          trend={growthTrend}
         />
         <DashboardCard 
           title="Market Share" 
           value={`${Number((dashboardData as any).trendMetrics?.marketShare || 0).toFixed(1)}%`} 
           icon={<PieChart size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-blue-500 to-blue-600"
-          trend={{ value: "+0.8% vs last quarter", isPositive: true }}
+          trend={growthTrend}
         />
         <DashboardCard 
           title="Seasonal Index" 
           value={`${Number((dashboardData as any).trendMetrics?.seasonalIndex || 0).toFixed(2)}`} 
           icon={<Calendar size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-purple-500 to-purple-600"
-          trend={{ value: "+0.15 vs last year", isPositive: true }}
+          trend={growthTrend}
         />
         <DashboardCard 
           title="Forecast Accuracy" 
           value={`${Number((dashboardData as any).trendMetrics?.forecastAccuracy || 0).toFixed(1)}%`} 
           icon={<Activity size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-orange-500 to-orange-600"
-          trend={{ value: "+1.8% vs last month", isPositive: true }}
+          trend={growthTrend}
         />
       </div>
 
@@ -821,7 +976,7 @@ const DashboardPage = () => {
           </p>
         </div>
         
-        <div className="mt-4 sm:mt-0">
+        <div className="mt-4 sm:mt-0 flex items-center gap-2">
           <select
             value={selectedTimeRange}
             onChange={(e) => setTimeRange(e.target.value)}
@@ -833,6 +988,37 @@ const DashboardPage = () => {
             <option value="last90days">Last 90 days</option>
             <option value="thisyear">This year</option>
           </select>
+
+          <div className="relative">
+            <button
+              onClick={() => setDownloadOpen((v) => !v)}
+              disabled={isExporting}
+              className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-60"
+            >
+              <Download size={16} />
+              {isExporting ? 'Preparing...' : 'Download'}
+              <ChevronDown size={14} />
+            </button>
+
+            {downloadOpen && (
+              <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-30">
+                <button
+                  onClick={handleDownloadStoreExcel}
+                  className="w-full text-left px-4 py-3 text-sm text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-t-lg"
+                >
+                  Download Store Data (Excel)
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Live DB export in bootstrap structure</div>
+                </button>
+                <button
+                  onClick={handleDownloadDashboardSnapshot}
+                  className="w-full text-left px-4 py-3 text-sm text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-b-lg border-t border-gray-100 dark:border-gray-700"
+                >
+                  Download Dashboard Snapshot (PDF)
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Shareable PDF of current dashboard view</div>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -842,6 +1028,7 @@ const DashboardPage = () => {
           {dashboardTabs.map((tab) => (
             <button
               key={tab.id}
+              data-dashboard-tab={tab.id}
               onClick={() => setSelectedDashboard(tab.id)}
               className={`flex items-center whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                 selectedDashboard === tab.id

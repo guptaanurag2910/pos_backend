@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
 import csv
+from io import BytesIO
 from decimal import Decimal
 
+import pandas as pd
 from django.db import connection
 from django.db.models import Avg, Count, F, Q, Sum, DecimalField, ExpressionWrapper, Min, Max
 from django.db.models.functions import TruncDate, TruncMonth, TruncWeek, TruncHour
@@ -17,6 +19,16 @@ from customers.models import Customer
 from inventory.models import StockLevel
 from sales.models import Bill, BillItem, Payment
 from stores.models import Store
+from suppliers.models import (
+    GoodsReceiptNote,
+    GoodsReceiptNoteItem,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    Supplier,
+    SupplierInvoice,
+    SupplierInvoiceItem,
+    SupplierPayment,
+)
 
 
 class ReportBaseMixin:
@@ -752,3 +764,334 @@ class TaxReportView(ReportBaseMixin, views.APIView):
             },
             'tax_rates': tax_summary,
         })
+
+
+class StoreBootstrapExportView(ReportBaseMixin, views.APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(responses={200: OpenApiTypes.BINARY})
+    def get(self, request):
+        store_id = self._resolve_scope_store_id(request)
+        if not store_id:
+            return Response({'detail': 'No store available for export.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        store = Store.objects.filter(id=store_id).first()
+        if not store:
+            return Response({'detail': 'Store not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        def _dt(v):
+            if not v:
+                return None
+            try:
+                return v.isoformat(sep=' ', timespec='seconds')
+            except TypeError:
+                return str(v)
+
+        def _date(v):
+            return v.isoformat() if v else None
+
+        stock_levels = StockLevel.objects.filter(store=store).select_related('product__category__parent', 'product')
+        inventory_rows = []
+        for sl in stock_levels:
+            category = sl.product.category
+            category_name = None
+            sub_category_name = None
+            if category:
+                if category.parent:
+                    category_name = category.parent.name
+                    sub_category_name = category.name
+                else:
+                    category_name = category.name
+
+            image_name = None
+            if sl.product.image:
+                image_name = str(sl.product.image.name).split('/')[-1]
+
+            inventory_rows.append({
+                'product_name': sl.product.name,
+                'barcode': sl.product.barcode,
+                'category': category_name,
+                'sub_category': sub_category_name,
+                'description': sl.product.description,
+                'price': float(sl.product.price or 0),
+                'cost_price': float(sl.product.cost_price or 0),
+                'discount_price': float(sl.product.discount_price) if sl.product.discount_price is not None else None,
+                'tax': int(sl.product.tax or 0),
+                'hsn_code': sl.product.hsn_code,
+                'unit': sl.product.unit,
+                'weight': float(sl.product.weight) if sl.product.weight is not None else None,
+                'is_active': bool(sl.product.is_active),
+                'is_featured': bool(sl.product.is_featured),
+                'is_service': bool(sl.product.is_service),
+                'image_filename': image_name,
+                'batch_number': sl.batch_number,
+                'expiry_date': _date(sl.expiry_date),
+                'quantity': float(sl.quantity or 0),
+                'min_stock': float(sl.min_stock or 0),
+                'max_stock': float(sl.max_stock) if sl.max_stock is not None else None,
+            })
+
+        store_bills = Bill.objects.filter(store=store).select_related('customer', 'cashier')
+        customer_ids = store_bills.exclude(customer_id__isnull=True).values_list('customer_id', flat=True).distinct()
+        customers = Customer.objects.filter(id__in=customer_ids)
+        customer_rows = [
+            {
+                'name': c.name,
+                'phone': c.phone,
+                'email': c.email,
+                'address': c.address,
+                'city': c.city,
+                'state': c.state,
+                'pincode': c.pincode,
+                'loyalty_points': c.loyalty_points,
+                'total_purchases': float(c.total_purchases or 0),
+                'last_purchase': _date(c.last_purchase),
+                'gst_number': c.gst_number,
+                'pan_number': c.pan_number,
+                'birthdate': _date(c.birthdate),
+                'anniversary': _date(c.anniversary),
+                'notes': c.notes,
+            }
+            for c in customers
+        ]
+
+        sales_rows = [
+            {
+                'bill_number': b.bill_number,
+                'invoice_number': b.invoice_number,
+                'customer_phone': b.customer.phone if b.customer else None,
+                'subtotal': float(b.subtotal or 0),
+                'tax_total': float(b.tax_total or 0),
+                'discount': float(b.discount or 0),
+                'round_off': float(b.round_off or 0),
+                'total': float(b.total or 0),
+                'payment_status': b.payment_status,
+                'payment_method': b.payment_method,
+                'status': b.status,
+                'notes': b.notes,
+                'completed_at': _dt(b.completed_at or b.created_at),
+            }
+            for b in store_bills
+        ]
+
+        sales_items = BillItem.objects.filter(bill__store=store).select_related('bill', 'product')
+        sales_item_rows = [
+            {
+                'bill_number': item.bill.bill_number,
+                'product_barcode': item.product.barcode,
+                'product_name': item.product.name,
+                'quantity': float(item.quantity or 0),
+                'price': float(item.price or 0),
+                'tax_rate': float(item.tax_rate or 0),
+                'discount_rate': float(item.discount_rate or 0),
+                'total': float(item.total or 0),
+            }
+            for item in sales_items
+        ]
+
+        payment_rows = [
+            {
+                'bill_number': p.bill.bill_number,
+                'amount': float(p.amount or 0),
+                'payment_method': p.payment_method,
+                'transaction_id': p.transaction_id,
+                'status': p.status,
+            }
+            for p in Payment.objects.filter(bill__store=store).select_related('bill')
+        ]
+
+        purchase_orders = PurchaseOrder.objects.filter(store=store).select_related('supplier')
+        supplier_ids = set(purchase_orders.values_list('supplier_id', flat=True))
+        grns = GoodsReceiptNote.objects.filter(store=store).select_related('supplier', 'purchase_order')
+        supplier_ids.update(grns.values_list('supplier_id', flat=True))
+        supplier_invoices = SupplierInvoice.objects.filter(store=store).select_related('supplier', 'purchase_order', 'grn')
+        supplier_ids.update(supplier_invoices.values_list('supplier_id', flat=True))
+
+        suppliers = Supplier.objects.filter(id__in=[sid for sid in supplier_ids if sid])
+        supplier_rows = [
+            {
+                'name': s.name,
+                'contact_person': s.contact_person,
+                'phone': s.phone,
+                'email': s.email,
+                'address': s.address,
+                'city': s.city,
+                'state': s.state,
+                'pincode': s.pincode,
+                'gst_number': s.gst_number,
+                'pan_number': s.pan_number,
+                'credit_period': s.credit_period,
+                'credit_limit': float(s.credit_limit or 0),
+                'current_balance': float(s.current_balance or 0),
+                'notes': s.notes,
+                'is_active': bool(s.is_active),
+            }
+            for s in suppliers
+        ]
+
+        po_rows = [
+            {
+                'po_number': po.po_number,
+                'supplier_name': po.supplier.name if po.supplier else None,
+                'supplier_phone': po.supplier.phone if po.supplier else None,
+                'order_date': _date(po.order_date),
+                'expected_delivery_date': _date(po.expected_delivery_date),
+                'status': po.status,
+                'payment_status': po.payment_status,
+                'shipping_charges': float(po.shipping_charges or 0),
+                'notes': po.notes,
+                'terms': po.terms,
+            }
+            for po in purchase_orders
+        ]
+
+        po_item_rows = [
+            {
+                'po_number': item.purchase_order.po_number,
+                'product_barcode': item.product.barcode if item.product else None,
+                'product_name': item.product.name if item.product else None,
+                'quantity_ordered': float(item.quantity_ordered or 0),
+                'quantity_received': float(item.quantity_received or 0),
+                'unit_price': float(item.unit_price or 0),
+                'tax_rate': float(item.tax_rate or 0),
+                'discount_percentage': float(item.discount_percentage or 0),
+                'expected_delivery_date': _date(item.expected_delivery_date),
+            }
+            for item in PurchaseOrderItem.objects.filter(purchase_order__store=store).select_related('purchase_order', 'product')
+        ]
+
+        grn_rows = [
+            {
+                'grn_number': g.grn_number,
+                'po_number': g.purchase_order.po_number if g.purchase_order else None,
+                'supplier_name': g.supplier.name if g.supplier else None,
+                'supplier_phone': g.supplier.phone if g.supplier else None,
+                'receipt_date': _date(g.receipt_date),
+                'invoice_number': g.invoice_number,
+                'invoice_date': _date(g.invoice_date),
+                'status': g.status,
+                'shipping_charges': float(g.shipping_charges or 0),
+                'notes': g.notes,
+            }
+            for g in grns
+        ]
+
+        grn_item_rows = [
+            {
+                'grn_number': item.grn.grn_number,
+                'product_barcode': item.product.barcode if item.product else None,
+                'product_name': item.product.name if item.product else None,
+                'quantity': float(item.quantity or 0),
+                'unit_price': float(item.unit_price or 0),
+                'tax_rate': float(item.tax_rate or 0),
+                'discount_percentage': float(item.discount_percentage or 0),
+                'batch_number': item.batch_number,
+                'expiry_date': _date(item.expiry_date),
+            }
+            for item in GoodsReceiptNoteItem.objects.filter(grn__store=store).select_related('grn', 'product')
+        ]
+
+        supplier_invoice_rows = [
+            {
+                'invoice_number': inv.invoice_number,
+                'supplier_invoice_number': inv.supplier_invoice_number,
+                'supplier_name': inv.supplier.name if inv.supplier else inv.supplier_name,
+                'supplier_phone': inv.supplier.phone if inv.supplier else None,
+                'po_number': inv.po_number,
+                'grn_number': inv.grn_number,
+                'invoice_date': _date(inv.invoice_date),
+                'due_date': _date(inv.due_date),
+                'status': inv.status,
+                'payment_terms': inv.payment_terms,
+                'subtotal': float(inv.subtotal or 0),
+                'discount_total': float(inv.discount_total or 0),
+                'tax_total': float(inv.tax_total or 0),
+                'shipping_charges': float(inv.shipping_charges or 0),
+                'grand_total': float(inv.grand_total or 0),
+                'notes': inv.notes,
+            }
+            for inv in supplier_invoices
+        ]
+
+        supplier_invoice_item_rows = [
+            {
+                'invoice_number': item.invoice.invoice_number,
+                'product_code': item.product_code or (item.product_ref.barcode if item.product_ref else None),
+                'product_barcode': item.product_ref.barcode if item.product_ref else None,
+                'product_name': item.product_name,
+                'quantity': float(item.quantity or 0),
+                'unit_price': float(item.unit_price or 0),
+                'discount': float(item.discount or 0),
+                'discount_type': item.discount_type,
+                'tax_rate': float(item.tax_rate or 0),
+            }
+            for item in SupplierInvoiceItem.objects.filter(invoice__store=store).select_related('invoice', 'product_ref')
+        ]
+
+        supplier_payment_qs = SupplierPayment.objects.filter(
+            Q(purchase_order__store=store) | Q(supplier_invoice__store=store)
+        ).select_related('supplier', 'purchase_order', 'supplier_invoice').distinct()
+        supplier_payment_rows = [
+            {
+                'supplier_name': pay.supplier.name if pay.supplier else None,
+                'supplier_phone': pay.supplier.phone if pay.supplier else None,
+                'po_number': pay.purchase_order.po_number if pay.purchase_order else None,
+                'invoice_number': pay.supplier_invoice.invoice_number if pay.supplier_invoice else None,
+                'amount': float(pay.amount or 0),
+                'payment_method': pay.payment_method,
+                'reference_number': pay.reference_number,
+                'payment_date': _date(pay.payment_date),
+                'status': pay.status,
+                'notes': pay.notes,
+            }
+            for pay in supplier_payment_qs
+        ]
+
+        sheet_columns = {
+            'inventory': ['product_name', 'barcode', 'category', 'sub_category', 'description', 'price', 'cost_price', 'discount_price', 'tax', 'hsn_code', 'unit', 'weight', 'is_active', 'is_featured', 'is_service', 'image_filename', 'batch_number', 'expiry_date', 'quantity', 'min_stock', 'max_stock'],
+            'customers': ['name', 'phone', 'email', 'address', 'city', 'state', 'pincode', 'loyalty_points', 'total_purchases', 'last_purchase', 'gst_number', 'pan_number', 'birthdate', 'anniversary', 'notes'],
+            'sales': ['bill_number', 'invoice_number', 'customer_phone', 'subtotal', 'tax_total', 'discount', 'round_off', 'total', 'payment_status', 'payment_method', 'status', 'notes', 'completed_at'],
+            'sales_items': ['bill_number', 'product_barcode', 'product_name', 'quantity', 'price', 'tax_rate', 'discount_rate', 'total'],
+            'payments': ['bill_number', 'amount', 'payment_method', 'transaction_id', 'status'],
+            'suppliers': ['name', 'contact_person', 'phone', 'email', 'address', 'city', 'state', 'pincode', 'gst_number', 'pan_number', 'credit_period', 'credit_limit', 'current_balance', 'notes', 'is_active'],
+            'purchase_orders': ['po_number', 'supplier_name', 'supplier_phone', 'order_date', 'expected_delivery_date', 'status', 'payment_status', 'shipping_charges', 'notes', 'terms'],
+            'purchase_order_items': ['po_number', 'product_barcode', 'product_name', 'quantity_ordered', 'quantity_received', 'unit_price', 'tax_rate', 'discount_percentage', 'expected_delivery_date'],
+            'grn': ['grn_number', 'po_number', 'supplier_name', 'supplier_phone', 'receipt_date', 'invoice_number', 'invoice_date', 'status', 'shipping_charges', 'notes'],
+            'grn_items': ['grn_number', 'product_barcode', 'product_name', 'quantity', 'unit_price', 'tax_rate', 'discount_percentage', 'batch_number', 'expiry_date'],
+            'supplier_invoices': ['invoice_number', 'supplier_invoice_number', 'supplier_name', 'supplier_phone', 'po_number', 'grn_number', 'invoice_date', 'due_date', 'status', 'payment_terms', 'subtotal', 'discount_total', 'tax_total', 'shipping_charges', 'grand_total', 'notes'],
+            'supplier_invoice_items': ['invoice_number', 'product_code', 'product_barcode', 'product_name', 'quantity', 'unit_price', 'discount', 'discount_type', 'tax_rate'],
+            'supplier_payments': ['supplier_name', 'supplier_phone', 'po_number', 'invoice_number', 'amount', 'payment_method', 'reference_number', 'payment_date', 'status', 'notes'],
+        }
+
+        sheets_data = {
+            'inventory': inventory_rows,
+            'customers': customer_rows,
+            'sales': sales_rows,
+            'sales_items': sales_item_rows,
+            'payments': payment_rows,
+            'suppliers': supplier_rows,
+            'purchase_orders': po_rows,
+            'purchase_order_items': po_item_rows,
+            'grn': grn_rows,
+            'grn_items': grn_item_rows,
+            'supplier_invoices': supplier_invoice_rows,
+            'supplier_invoice_items': supplier_invoice_item_rows,
+            'supplier_payments': supplier_payment_rows,
+        }
+
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            for sheet_name, columns in sheet_columns.items():
+                rows = sheets_data.get(sheet_name, [])
+                df = pd.DataFrame(rows, columns=columns)
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+        output.seek(0)
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = (
+            f'attachment; filename="store_bootstrap_live_{store.code}_{timezone.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
+        )
+        return response

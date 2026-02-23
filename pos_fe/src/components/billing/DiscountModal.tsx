@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Percent, DollarSign } from 'lucide-react';
+import { X, Percent, IndianRupee } from 'lucide-react';
 
 interface DiscountModalProps {
   subtotal: number;
@@ -75,7 +75,7 @@ const DiscountModal = ({ subtotal, onClose, onApply }: DiscountModalProps) => {
                   }`}
                   onClick={() => setDiscountType('amount')}
                 >
-                  <DollarSign size={18} className="mr-1" />
+                  <IndianRupee size={18} className="mr-1" />
                   <span>Amount (₹)</span>
                 </button>
                 

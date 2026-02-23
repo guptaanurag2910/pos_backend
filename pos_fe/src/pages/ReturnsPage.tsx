@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   RotateCcw,
   Search,
@@ -37,11 +37,53 @@ const ReturnsPage = () => {
   const [selectedReturn, setSelectedReturn] = useState<ReturnAPI | null>(null);
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
   const [returns, setReturns] = useState<ReturnAPI[]>([]);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchReturns();
     fetchCompletedBills();
   }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+
+      if (event.key === 'F2') {
+        event.preventDefault();
+        if (showReturnModal) {
+          const modalSearch = document.querySelector<HTMLInputElement>('[data-shortcut="return-bill-search"]');
+          modalSearch?.focus();
+          modalSearch?.select();
+          return;
+        }
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+
+      if (event.key === 'F4') {
+        event.preventDefault();
+        setShowReturnModal(true);
+        return;
+      }
+
+      if (isCtrlOrMeta && key === 'r') {
+        event.preventDefault();
+        void fetchReturns();
+        void fetchCompletedBills();
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        if (showDetailsModal) setShowDetailsModal(false);
+        else if (showReturnModal) setShowReturnModal(false);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showReturnModal, showDetailsModal]);
 
   const fetchReturns = async () => {
     try {
@@ -240,6 +282,7 @@ const ReturnsPage = () => {
               <Search size={18} className="text-gray-400 dark:text-gray-500" />
             </div>
             <input
+              ref={searchInputRef}
               type="text"
               placeholder="Search returns..."
               value={searchQuery}

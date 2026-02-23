@@ -36,7 +36,7 @@ interface SupplierInvoice {
 interface SupplierInvoiceModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (invoice: SupplierInvoice) => void;
+  onSave: (invoice: SupplierInvoice) => void | Promise<void | boolean>;
   initialData?: SupplierInvoice;
   poData?: any;
   grnData?: any;
@@ -172,12 +172,13 @@ const SupplierInvoiceModal = ({ isOpen, onClose, onSave, initialData, poData, gr
     }
   }, [formData.invoiceDate, formData.paymentTerms]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!formData.supplierInvoiceNumber || !formData.supplierName || formData.items.length === 0) {
       alert('Please fill in supplier invoice number, supplier name, and add at least one item');
       return;
     }
-    onSave(formData);
+    const result = await Promise.resolve(onSave(formData));
+    if (result === false) return;
     onClose();
   };
 

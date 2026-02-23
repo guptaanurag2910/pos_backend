@@ -3,14 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import {
   Plus,
   Search,
-  Filter,
   Clock,
   CheckCircle,
   AlertTriangle,
   Eye,
   Edit,
   Package,
-  Truck,
 } from 'lucide-react';
 import { listGRNs } from '../../service/purchaseService';
 
@@ -66,47 +64,23 @@ const GoodsReceiptPage = () => {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-start">
+      <div className="flex justify-between items-center">
         <div>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
-            Welcome, Cashier User
-          </p>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Today is {new Date().toLocaleDateString('en-GB')}
-          </p>
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Goods Receipt Notes</h1>
+          <p className="text-gray-600 dark:text-gray-400">Step 2 of 4: Receive items against purchase orders</p>
         </div>
-        <div className="flex space-x-3">
-          <button
-            onClick={() => navigate('/grns/new?from_po=true')}
-            className="flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
-          >
-            <Truck size={18} className="mr-2" />
-            From PO
-          </button>
-          <button
-            onClick={() => navigate('/grns/new')}
-            className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 dark:hover:bg-primary-600"
-          >
-            <Plus size={18} className="mr-2" />
-            New GRN
-          </button>
-        </div>
-      </div>
-
-      {/* Title */}
-      <div>
-        <h1 className="text-3xl font-semibold text-gray-800 dark:text-gray-100">
-          Goods Receipt Notes
-        </h1>
-        <p className="text-gray-600 dark:text-gray-400">
-          Record and verify received goods from suppliers
-        </p>
+        <button
+          onClick={() => navigate('/grns/new')}
+          className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 dark:hover:bg-primary-600"
+        >
+          <Plus size={18} className="mr-2" />
+          New GRN
+        </button>
       </div>
 
       {/* Filters */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <Search size={18} className="text-gray-400 dark:text-gray-500" />
@@ -131,15 +105,6 @@ const GoodsReceiptPage = () => {
             <option value="discrepancy">With Discrepancy</option>
           </select>
 
-          <input
-            type="date"
-            className="px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-gray-900 dark:text-gray-100"
-          />
-
-          <button className="flex items-center justify-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">
-            <Filter size={18} className="mr-2" />
-            More Filters
-          </button>
         </div>
       </div>
 

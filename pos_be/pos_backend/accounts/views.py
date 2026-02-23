@@ -11,7 +11,7 @@ from django.db import transaction
 
 from .serializers import (
     UserSerializer, CustomTokenObtainPairSerializer, ChangePasswordSerializer, 
-    UserSessionSerializer, AuditLogSerializer, LogoutSerializer
+    UserSessionSerializer, AuditLogSerializer, LogoutSerializer, RegistrationSerializer
 )
 from .models import UserSession, AuditLog
 from .permissions import IsAdminUser, IsManagerUser, IsOwnerOrAdmin
@@ -19,6 +19,11 @@ from .utils import get_client_ip, get_user_agent
 from .throttles import LoginRateThrottle
 
 User = get_user_model()
+
+
+class RegisterView(generics.CreateAPIView):
+    serializer_class = RegistrationSerializer
+    permission_classes = [AllowAny]
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer

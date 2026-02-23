@@ -207,7 +207,6 @@ class GoodsReceiptNote(models.Model):
         return self.grn_number
 
     def calculate_totals(self):
-        print("@"*100)
         items = self.items.all()
 
         if not items:
@@ -220,7 +219,6 @@ class GoodsReceiptNote(models.Model):
         raw_subtotal = sum(item.unit_price * item.quantity for item in items)
         discount_total = sum(item.discount_amount for item in items)
         tax_total = sum(item.tax_amount for item in items)
-        print(raw_subtotal, discount_total, tax_total, self.shipping_charges)
 
         self.subtotal = raw_subtotal
         self.discount_total = discount_total
@@ -261,7 +259,6 @@ class GoodsReceiptNoteItem(models.Model):
 
     def save(self, *args, **kwargs):
         # Ensure all values are properly converted to Decimal
-        print("b" * 100)
         unit_price = Decimal(str(self.unit_price))
         quantity = Decimal(str(self.quantity))
         discount_percentage = Decimal(str(self.discount_percentage))

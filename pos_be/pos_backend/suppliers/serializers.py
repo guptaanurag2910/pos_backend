@@ -214,12 +214,14 @@ class SupplierInvoiceSerializer(serializers.ModelSerializer):
 class SupplierPaymentSerializer(serializers.ModelSerializer):
     supplier_name = serializers.StringRelatedField(source='supplier', read_only=True)
     po_number = serializers.StringRelatedField(source='purchase_order.po_number', read_only=True)
+    supplier_invoice_number = serializers.StringRelatedField(source='supplier_invoice.invoice_number', read_only=True)
     created_by_name = serializers.StringRelatedField(source='created_by', read_only=True)
     
     class Meta:
         model = SupplierPayment
         fields = (
             'id', 'supplier', 'supplier_name', 'purchase_order', 'po_number',
+            'supplier_invoice', 'supplier_invoice_number',
             'amount', 'payment_method', 'reference_number', 'payment_date',
             'status', 'notes', 'created_by', 'created_by_name', 'created_at', 'updated_at'
         )

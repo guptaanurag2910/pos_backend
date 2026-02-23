@@ -166,7 +166,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 object_repr=f"{product.name} stock adjustment",
                 ip_address=get_client_ip(request),
                 details={
-                    'adjustment': quantity,
+                    'adjustment': str(quantity),
                     'reason': reason,
                     'new_level': str(stock_level.quantity)
                 }

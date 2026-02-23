@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { 
   Users, 
   UserPlus, 
@@ -15,7 +15,7 @@ import { User } from '../types';
 import { format } from 'date-fns';
 
 const UsersPage = () => {
-  const { users, addUser, toggleUserStatus } = useAuthStore();
+  const { users, addUser, toggleUserStatus, loadUsers } = useAuthStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [newUser, setNewUser] = useState({
@@ -26,6 +26,10 @@ const UsersPage = () => {
   });
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    loadUsers();
+  }, [loadUsers]);
 
   const filteredUsers = users.filter((user) => {
     const query = searchQuery.toLowerCase();

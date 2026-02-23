@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
 from decimal import Decimal, InvalidOperation
@@ -17,6 +18,37 @@ from .serializers import (
 from accounts.permissions import IsManagerUser
 from accounts.models import AuditLog
 from accounts.utils import get_client_ip
+from stores.models import Store
+
+
+def _resolve_store(request):
+    """
+    Resolve store for bill creation:
+    1) request.user.store
+    2) explicit request.data['store']
+    3) main active store
+    4) first active store
+    """
+    user_store = getattr(request.user, 'store', None)
+    if user_store:
+        return user_store
+
+    store_id = request.data.get('store')
+    if store_id:
+        try:
+            return Store.objects.get(id=store_id, is_active=True)
+        except Store.DoesNotExist:
+            raise serializers.ValidationError({"store": "Invalid or inactive store."})
+
+    fallback = Store.objects.filter(is_main=True, is_active=True).first()
+    if not fallback:
+        fallback = Store.objects.filter(is_active=True).order_by('id').first()
+    if fallback:
+        return fallback
+
+    raise serializers.ValidationError(
+        {"store": "No active store found. Assign a store to this user or create an active store."}
+    )
 
 class BillViewSet(viewsets.ModelViewSet):
     serializer_class = BillSerializer
@@ -82,6 +114,25 @@ class BillViewSet(viewsets.ModelViewSet):
             )
         
         payment_method = request.data.get('payment_method')
+        valid_methods = {key for key, _ in Payment.PAYMENT_METHOD_CHOICES}
+        if payment_method == '':
+            payment_method = None
+        if payment_method and payment_method not in valid_methods:
+            return Response(
+                {"detail": "Invalid payment_method"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        paid_total_raw = bill.payments.filter(status='completed').aggregate(total=Sum('amount')).get('total') or Decimal('0.00')
+        paid_total = Decimal(str(paid_total_raw))
+        bill_total = Decimal(str(bill.total))
+
+        # Completion must either provide a payment method for due collection, or already have enough completed payments.
+        if not payment_method and paid_total < bill_total:
+            return Response(
+                {"detail": "payment_method is required when bill is not fully paid"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         with transaction.atomic():
             # Complete the bill
@@ -100,11 +151,13 @@ class BillViewSet(viewsets.ModelViewSet):
                 bill.invoice_number = self._generate_invoice_number(bill)
                 bill.save(update_fields=['invoice_number', 'updated_at'])
             
-            # Create payment record if payment method provided
-            if payment_method:
+            # Create payment record only for outstanding amount.
+            # This avoids duplicate rows when frontend has already created payment entries before completion.
+            amount_due = (bill_total - paid_total).quantize(Decimal('0.01'))
+            if payment_method and amount_due > Decimal('0.00'):
                 Payment.objects.create(
                     bill=bill,
-                    amount=bill.total,
+                    amount=amount_due,
                     payment_method=payment_method,
                     status='completed',
                     created_by=request.user
@@ -310,10 +363,7 @@ class BillViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         with transaction.atomic():
             user = self.request.user
-            store = getattr(user, 'store', None)
-
-            if store is None:
-                raise serializers.ValidationError("User is not associated with any store.")
+            store = _resolve_store(self.request)
 
             last_bill = Bill.objects.filter(store=store).order_by('-created_at').first()
 

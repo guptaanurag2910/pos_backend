@@ -35,7 +35,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
         include_inactive = str(self.request.query_params.get('include_inactive', 'false')).lower() == 'true'
         if not include_inactive:
             queryset = queryset.filter(is_active=True)
-        return queryset
+        return queryset.order_by('name', 'id')
     
     @action(detail=True, methods=['get'])
     def purchase_history(self, request, pk=None):
@@ -67,6 +67,13 @@ class CustomerViewSet(viewsets.ModelViewSet):
             )
         
         with transaction.atomic():
+            new_balance = customer.loyalty_points + points
+            if new_balance < 0:
+                return Response(
+                    {"detail": "Insufficient loyalty points for deduction"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             customer.loyalty_points += points
             customer.save()
             

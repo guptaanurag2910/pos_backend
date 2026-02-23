@@ -34,8 +34,16 @@ export const signupAPI = async (
   password: string,
   name: string
 ): Promise<AuthResponse> => {
-  await axiosInstance.post(`${AUTH_URL}users/`, { email, password, name });
+  await axiosInstance.post(`${AUTH_URL}register/`, { email, password, name });
   return loginAPI(email, password); // Immediately login after signup
+};
+
+export const patchUser = async (
+  userId: number,
+  data: Partial<{ name: string; email: string; role: string; store: number | null; is_active: boolean }>
+) => {
+  const res = await axiosInstance.patch(`${AUTH_URL}users/${userId}/`, data);
+  return res.data;
 };
 
 export const logoutAPI = async (): Promise<void> => {

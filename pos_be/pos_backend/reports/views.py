@@ -3,7 +3,7 @@ import csv
 from decimal import Decimal
 
 from django.db import connection
-from django.db.models import Avg, Count, F, Q, Sum, DecimalField, ExpressionWrapper
+from django.db.models import Avg, Count, F, Q, Sum, DecimalField, ExpressionWrapper, Min, Max
 from django.db.models.functions import TruncDate, TruncMonth, TruncWeek, TruncHour
 from django.http import HttpResponse
 from django.utils import timezone
@@ -13,10 +13,10 @@ from rest_framework import status, views
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from accounts.permissions import IsManagerUser
 from customers.models import Customer
 from inventory.models import StockLevel
 from sales.models import Bill, BillItem, Payment
+from stores.models import Store
 
 
 class ReportBaseMixin:
@@ -32,13 +32,26 @@ class ReportBaseMixin:
         if self._table_has_column(Customer._meta.db_table, 'is_active'):
             queryset = queryset.filter(is_active=True)
 
-        store_id = request.query_params.get('store')
-        if request.user.role == 'admin' and store_id:
+        store_id = self._resolve_scope_store_id(request)
+        if request.user.role == 'admin' and request.query_params.get('store') and store_id:
             queryset = queryset.filter(bills__store_id=store_id).distinct()
-        elif request.user.role != 'admin' and request.user.store_id:
-            queryset = queryset.filter(bills__store_id=request.user.store_id).distinct()
+        elif store_id:
+            queryset = queryset.filter(bills__store_id=store_id).distinct()
 
         return queryset
+
+    def _resolve_scope_store_id(self, request):
+        explicit_store = request.query_params.get('store')
+        if request.user.role == 'admin' and explicit_store:
+            return explicit_store
+
+        if request.user.store_id:
+            return request.user.store_id
+
+        fallback = Store.objects.filter(is_main=True, is_active=True).values_list('id', flat=True).first()
+        if fallback:
+            return fallback
+        return Store.objects.filter(is_active=True).order_by('id').values_list('id', flat=True).first()
 
     def _parse_date_range(self, request, default_days=30):
         start_date_raw = request.query_params.get('start_date')
@@ -75,17 +88,17 @@ class ReportBaseMixin:
         return start_date, end_date
 
     def _scope_bill_queryset(self, request, queryset):
-        store_id = request.query_params.get('store')
+        store_id = self._resolve_scope_store_id(request)
         user = request.user
 
-        if user.role == 'admin' and store_id:
+        if user.role == 'admin' and request.query_params.get('store') and store_id:
             return queryset.filter(store_id=store_id)
 
         if user.role == 'admin':
             return queryset
 
-        if user.store_id:
-            return queryset.filter(store_id=user.store_id)
+        if store_id:
+            return queryset.filter(store_id=store_id)
 
         return queryset.none()
 
@@ -111,19 +124,34 @@ class DashboardView(ReportBaseMixin, views.APIView):
 
     @extend_schema(responses={200: OpenApiTypes.OBJECT})
     def get(self, request):
-        try:
-            start_date, end_date = self._parse_date_range(request, default_days=30)
-        except ValueError as exc:
-            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        all_time = request.query_params.get('all_time', 'false').lower() == 'true'
 
-        bills = Bill.objects.filter(
-            status='completed',
-            created_at__date__gte=start_date,
-            created_at__date__lte=end_date,
-        ).select_related('customer', 'store')
-        bills = self._scope_bill_queryset(request, bills)
+        scoped_completed = self._scope_bill_queryset(
+            request,
+            Bill.objects.filter(status='completed'),
+        )
 
         today = timezone.localdate()
+
+        if all_time:
+            bounds = scoped_completed.aggregate(
+                start_date=Min('created_at__date'),
+                end_date=Max('created_at__date'),
+            )
+            start_date = bounds.get('start_date') or today
+            end_date = bounds.get('end_date') or today
+            bills = scoped_completed.select_related('customer', 'store')
+        else:
+            try:
+                start_date, end_date = self._parse_date_range(request, default_days=30)
+            except ValueError as exc:
+                return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+            bills = scoped_completed.filter(
+                created_at__date__gte=start_date,
+                created_at__date__lte=end_date,
+            ).select_related('customer', 'store')
+
         month_start = today.replace(day=1)
         week_start = today - timedelta(days=today.weekday())
         yesterday = today - timedelta(days=1)
@@ -149,10 +177,11 @@ class DashboardView(ReportBaseMixin, views.APIView):
         ).aggregate(total=Sum('total')).get('total') or 0
 
         stock_levels = StockLevel.objects.select_related('product', 'store')
-        if request.user.role != 'admin' and request.user.store_id:
-            stock_levels = stock_levels.filter(store_id=request.user.store_id)
-        elif request.user.role == 'admin' and request.query_params.get('store'):
-            stock_levels = stock_levels.filter(store_id=request.query_params.get('store'))
+        scope_store_id = self._resolve_scope_store_id(request)
+        if request.user.role == 'admin' and request.query_params.get('store') and scope_store_id:
+            stock_levels = stock_levels.filter(store_id=scope_store_id)
+        elif request.user.role != 'admin' and scope_store_id:
+            stock_levels = stock_levels.filter(store_id=scope_store_id)
 
         inventory_totals = stock_levels.aggregate(
             total_items=Count('id'),
@@ -166,7 +195,6 @@ class DashboardView(ReportBaseMixin, views.APIView):
 
         top_products = BillItem.objects.filter(
             bill__in=bills,
-            bill__created_at__date__gte=max(start_date, end_date - timedelta(days=30)),
         ).values('product__name').annotate(
             quantity=Sum('quantity'),
             amount=Sum('total'),
@@ -286,6 +314,7 @@ class DashboardView(ReportBaseMixin, views.APIView):
             'meta': {
                 'startDate': start_date.strftime('%Y-%m-%d'),
                 'endDate': end_date.strftime('%Y-%m-%d'),
+                'allTime': all_time,
             },
             'salesSummary': {
                 'today': float(today_sales),
@@ -355,23 +384,29 @@ class DashboardView(ReportBaseMixin, views.APIView):
 
 
 class SalesReportView(ReportBaseMixin, views.APIView):
-    permission_classes = [IsAuthenticated, IsManagerUser]
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(responses={200: OpenApiTypes.OBJECT})
     def get(self, request):
         group_by = request.query_params.get('group_by', 'day')
         export = request.query_params.get('export', 'false').lower() == 'true'
+        all_time = request.query_params.get('all_time', 'false').lower() == 'true'
 
-        try:
-            start_date, end_date = self._parse_date_range(request, default_days=30)
-        except ValueError as exc:
-            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if all_time:
+            start_date = None
+            end_date = None
+        else:
+            try:
+                start_date, end_date = self._parse_date_range(request, default_days=30)
+            except ValueError as exc:
+                return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        filters = Q(
-            created_at__date__gte=start_date,
-            created_at__date__lte=end_date,
-            status='completed',
-        )
+        filters = Q(status='completed')
+        if start_date and end_date:
+            filters &= Q(
+                created_at__date__gte=start_date,
+                created_at__date__lte=end_date,
+            )
 
         base_qs = self._scope_bill_queryset(request, Bill.objects.filter(filters))
 
@@ -413,8 +448,9 @@ class SalesReportView(ReportBaseMixin, views.APIView):
 
         result = {
             'summary': {
-                'start_date': start_date.strftime('%Y-%m-%d'),
-                'end_date': end_date.strftime('%Y-%m-%d'),
+                'start_date': start_date.strftime('%Y-%m-%d') if start_date else None,
+                'end_date': end_date.strftime('%Y-%m-%d') if end_date else None,
+                'all_time': all_time,
                 'total_sales': float(total_sales_value),
                 'bill_count': bill_count,
                 'average_bill_value': float((total_sales_value / bill_count) if bill_count else 0),
@@ -448,7 +484,8 @@ class SalesReportView(ReportBaseMixin, views.APIView):
 
         if export:
             response = HttpResponse(content_type='text/csv')
-            response['Content-Disposition'] = f'attachment; filename="sales_report_{start_date}_{end_date}.csv"'
+            range_tag = f"{start_date}_{end_date}" if start_date and end_date else "all_time"
+            response['Content-Disposition'] = f'attachment; filename="sales_report_{range_tag}.csv"'
             writer = csv.writer(response)
             writer.writerow(['Date', 'Number of Bills', 'Total Sales', 'Average Bill Value'])
             for item in result['sales_over_time']:
@@ -463,19 +500,24 @@ class SalesReportView(ReportBaseMixin, views.APIView):
 
 
 class InventoryReportView(ReportBaseMixin, views.APIView):
-    permission_classes = [IsAuthenticated, IsManagerUser]
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(responses={200: OpenApiTypes.OBJECT})
     def get(self, request):
         category_id = request.query_params.get('category')
         low_stock_only = request.query_params.get('low_stock', 'false').lower() == 'true'
         export = request.query_params.get('export', 'false').lower() == 'true'
+        try:
+            start_date, end_date = self._parse_date_range(request, default_days=30)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         filters = Q()
-        if request.user.role == 'admin' and request.query_params.get('store'):
-            filters &= Q(store_id=request.query_params.get('store'))
-        elif request.user.store_id:
-            filters &= Q(store_id=request.user.store_id)
+        scope_store_id = self._resolve_scope_store_id(request)
+        if request.user.role == 'admin' and request.query_params.get('store') and scope_store_id:
+            filters &= Q(store_id=scope_store_id)
+        elif request.user.role != 'admin' and scope_store_id:
+            filters &= Q(store_id=scope_store_id)
 
         if category_id:
             filters &= Q(product__category_id=category_id)
@@ -485,19 +527,20 @@ class InventoryReportView(ReportBaseMixin, views.APIView):
 
         inventory_data = StockLevel.objects.filter(filters).select_related('product', 'store', 'product__category')
 
-        thirty_days_ago = timezone.now() - timedelta(days=30)
+        range_days = max(1, (end_date - start_date).days + 1)
         result_data = []
         for item in inventory_data:
-            sales_30_days = BillItem.objects.filter(
+            sales_in_range = BillItem.objects.filter(
                 product=item.product,
                 bill__store=item.store,
                 bill__status='completed',
-                bill__created_at__gte=thirty_days_ago,
+                bill__created_at__date__gte=start_date,
+                bill__created_at__date__lte=end_date,
             ).aggregate(total=Sum('quantity')).get('total') or 0
 
             days_remaining = None
-            if sales_30_days and float(sales_30_days) > 0:
-                daily_sales = float(sales_30_days) / 30
+            if sales_in_range and float(sales_in_range) > 0:
+                daily_sales = float(sales_in_range) / range_days
                 if daily_sales > 0:
                     days_remaining = int(float(item.quantity) / daily_sales)
 
@@ -521,7 +564,7 @@ class InventoryReportView(ReportBaseMixin, views.APIView):
                 'cost_price': float(item.product.cost_price),
                 'sales_price': float(item.product.price),
                 'value': value,
-                'sales_30_days': float(sales_30_days),
+                'sales_in_range': float(sales_in_range),
                 'days_remaining': days_remaining,
                 'updated_at': item.updated_at.strftime('%Y-%m-%d %H:%M:%S'),
             })
@@ -533,49 +576,58 @@ class InventoryReportView(ReportBaseMixin, views.APIView):
             writer.writerow([
                 'Product', 'Barcode', 'Category', 'Store', 'Quantity', 'Min Stock',
                 'Low Stock', 'Status', 'Batch', 'Expiry', 'Cost', 'Price', 'Value',
-                'Sales (30d)', 'Days Remaining',
+                f'Sales ({start_date} to {end_date})', 'Days Remaining',
             ])
             for item in result_data:
                 writer.writerow([
                     item['product_name'], item['barcode'], item['category'], item['store_name'],
                     item['quantity'], item['min_stock'], 'Yes' if item['is_low_stock'] else 'No',
                     item['status'], item['batch_number'], item['expiry_date'], item['cost_price'],
-                    item['sales_price'], item['value'], item['sales_30_days'], item['days_remaining'],
+                    item['sales_price'], item['value'], item['sales_in_range'], item['days_remaining'],
                 ])
             return response
 
         return Response({
+            'period': {
+                'start_date': start_date.strftime('%Y-%m-%d'),
+                'end_date': end_date.strftime('%Y-%m-%d'),
+            },
             'inventory': result_data,
             'summary': {
                 'total_items': len(result_data),
                 'low_stock_items': sum(1 for item in result_data if item['is_low_stock']),
                 'out_of_stock_items': sum(1 for item in result_data if item['status'] == 'out_of_stock'),
                 'total_value': sum(item['value'] for item in result_data),
+                'range_days': range_days,
             },
         })
 
 
 class CustomerReportView(ReportBaseMixin, views.APIView):
-    permission_classes = [IsAuthenticated, IsManagerUser]
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(responses={200: OpenApiTypes.OBJECT})
     def get(self, request):
         export = request.query_params.get('export', 'false').lower() == 'true'
+        all_time = request.query_params.get('all_time', 'false').lower() == 'true'
 
-        try:
-            start_date, end_date = self._parse_date_range(request, default_days=90)
-        except ValueError as exc:
-            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if all_time:
+            start_date = None
+            end_date = None
+        else:
+            try:
+                start_date, end_date = self._parse_date_range(request, default_days=90)
+            except ValueError as exc:
+                return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        bill_qs = self._scope_bill_queryset(
-            request,
-            Bill.objects.filter(
+        bill_filters = Q(status='completed', customer__isnull=False)
+        if start_date and end_date:
+            bill_filters &= Q(
                 created_at__date__gte=start_date,
                 created_at__date__lte=end_date,
-                status='completed',
-                customer__isnull=False,
-            ),
-        )
+            )
+
+        bill_qs = self._scope_bill_queryset(request, Bill.objects.filter(bill_filters))
 
         customer_purchase_data = bill_qs.values('customer__id', 'customer__name').annotate(
             purchase_count=Count('id'),
@@ -599,13 +651,17 @@ class CustomerReportView(ReportBaseMixin, views.APIView):
 
         total_customers = base_customers.count()
         active_customers = len(set(customer_ids))
-        new_customers = base_customers.filter(created_at__date__gte=start_date, created_at__date__lte=end_date).count()
+        if start_date and end_date:
+            new_customers = base_customers.filter(created_at__date__gte=start_date, created_at__date__lte=end_date).count()
+        else:
+            new_customers = total_customers
 
         loyalty_data = base_customers.aggregate(total_points=Sum('loyalty_points'), avg_points=Avg('loyalty_points'))
 
         if export:
             response = HttpResponse(content_type='text/csv')
-            response['Content-Disposition'] = f'attachment; filename="customer_report_{start_date}_{end_date}.csv"'
+            range_tag = f"{start_date}_{end_date}" if start_date and end_date else "all_time"
+            response['Content-Disposition'] = f'attachment; filename="customer_report_{range_tag}.csv"'
             writer = csv.writer(response)
             writer.writerow(['Customer Name', 'Number of Purchases', 'Total Spent', 'Average Purchase'])
             for item in purchase_data_list:
@@ -618,8 +674,9 @@ class CustomerReportView(ReportBaseMixin, views.APIView):
                 'active_customers': active_customers,
                 'new_customers': new_customers,
                 'period': {
-                    'start_date': start_date.strftime('%Y-%m-%d'),
-                    'end_date': end_date.strftime('%Y-%m-%d'),
+                    'start_date': start_date.strftime('%Y-%m-%d') if start_date else None,
+                    'end_date': end_date.strftime('%Y-%m-%d') if end_date else None,
+                    'all_time': all_time,
                 },
             },
             'purchase_data': purchase_data_list,
@@ -632,7 +689,7 @@ class CustomerReportView(ReportBaseMixin, views.APIView):
 
 
 class TaxReportView(ReportBaseMixin, views.APIView):
-    permission_classes = [IsAuthenticated, IsManagerUser]
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(responses={200: OpenApiTypes.OBJECT})
     def get(self, request):

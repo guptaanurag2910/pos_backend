@@ -25,7 +25,8 @@ class StoreViewSet(viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
 
     def get_parsers(self):
-        if self.action == 'bootstrap_import':
+        action = getattr(self, 'action', None)
+        if action == 'bootstrap_import':
             return [MultiPartParser(), FormParser()]
         return super().get_parsers()
     
@@ -37,8 +38,8 @@ class StoreViewSet(viewsets.ModelViewSet):
             return Store.objects.filter(id=user.store.id)
         return Store.objects.none()
     
-    @action(detail=True, methods=['get', 'put', 'patch'])
-    def settings(self, request, pk=None):
+    @action(detail=True, methods=['get', 'put', 'patch'], url_path='settings')
+    def store_settings(self, request, pk=None):
         store = self.get_object()
         
         # Get or create settings object

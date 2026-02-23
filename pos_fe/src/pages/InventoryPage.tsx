@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   listProducts,
   listCategories,
@@ -21,6 +21,8 @@ const InventoryPage = () => {
   const [categoryFilter, setCategoryFilter] = useState<number | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const categoryFilterRef = useRef<HTMLSelectElement>(null);
 
   const fetchData = async () => {
     try {
@@ -36,6 +38,46 @@ const InventoryPage = () => {
   useEffect(() => {
     fetchData();
   }, [searchQuery, categoryFilter]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+
+      if (event.key === 'F2') {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+
+      if (event.key === 'F3') {
+        event.preventDefault();
+        categoryFilterRef.current?.focus();
+        return;
+      }
+
+      if (event.key === 'F4') {
+        event.preventDefault();
+        setShowModal(true);
+        return;
+      }
+
+      if (isCtrlOrMeta && key === 'r') {
+        event.preventDefault();
+        void fetchData();
+        return;
+      }
+
+      if (event.key === 'Escape' && showModal) {
+        event.preventDefault();
+        setShowModal(false);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showModal, searchQuery, categoryFilter]);
 
   const handleSaveProduct = async (data: Partial<Product>) => {
     try {
@@ -86,6 +128,7 @@ const InventoryPage = () => {
       <div className="mb-6 flex items-center justify-between gap-4">
         <div className="relative flex-1">
           <input
+            ref={searchInputRef}
             type="text"
             placeholder="Search products by name or barcode..."
             value={searchQuery}
@@ -104,6 +147,7 @@ const InventoryPage = () => {
         </div>
 
         <select
+          ref={categoryFilterRef}
           value={categoryFilter ?? ''}
           onChange={(e) => setCategoryFilter(e.target.value ? Number(e.target.value) : null)}
           className="border border-gray-300 px-3 py-2 rounded-md text-sm bg-white shadow-sm"

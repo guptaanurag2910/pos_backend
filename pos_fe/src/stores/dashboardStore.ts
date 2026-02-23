@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { DashboardData } from '../types';
-import { mockDashboardData } from '../data/mockData';
 import { fetchDashboard } from '../service/reportService';
 
 interface DashboardStore {
@@ -21,16 +20,21 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     try {
       set({ isLoading: true });
 
-      const apiData = await fetchDashboard();
+      const selectedTimeRange = get().selectedTimeRange;
+      const params =
+        selectedTimeRange === 'alltime'
+          ? { all_time: true }
+          : { time_range: selectedTimeRange as 'last7days' | 'last30days' | 'last90days' | 'thisyear' };
+
+      const apiData = await fetchDashboard(params);
       set({
         dashboardData: apiData as unknown as DashboardData,
         isLoading: false
       });
     } catch (error) {
       console.error('Error loading dashboard data:', error);
-      // Safe fallback to local mock data when API is unavailable.
       set({
-        dashboardData: mockDashboardData as unknown as DashboardData,
+        dashboardData: null,
         isLoading: false
       });
     }

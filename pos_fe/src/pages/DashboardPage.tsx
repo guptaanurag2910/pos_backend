@@ -4,7 +4,7 @@ import {
   ShoppingBag, 
   AlertTriangle, 
   Package, 
-  DollarSign,
+  IndianRupee,
   Users,
   BarChart3,
   PieChart,
@@ -84,7 +84,7 @@ const DashboardCard = ({
 };
 
 const DashboardPage = () => {
-  const { dashboardData, isLoading, loadDashboardData } = useDashboardStore();
+  const { dashboardData, isLoading, loadDashboardData, selectedTimeRange, setTimeRange } = useDashboardStore();
   const { settings } = useAuthStore();
   const isDarkMode = settings.general.theme === 'dark';
   const [selectedDashboard, setSelectedDashboard] = useState('overview');
@@ -108,7 +108,7 @@ const DashboardPage = () => {
 
   const dashboardTabs = [
     { id: 'overview', name: 'Overview', icon: <BarChart3 size={18} /> },
-    { id: 'sales', name: 'Sales Analytics', icon: <DollarSign size={18} /> },
+    { id: 'sales', name: 'Sales Analytics', icon: <IndianRupee size={18} /> },
     { id: 'inventory', name: 'Inventory', icon: <Package size={18} /> },
     { id: 'customers', name: 'Customers', icon: <Users size={18} /> },
     { id: 'performance', name: 'Performance', icon: <Activity size={18} /> },
@@ -157,13 +157,13 @@ const DashboardPage = () => {
     },
   };
 
-  // Mock data for different dashboards
+  const salesTrendRows = (dashboardData as any).salesTrend || [];
   const salesTrendData = {
-    labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+    labels: salesTrendRows.map((row: any) => row.period),
     datasets: [
       {
         label: 'Sales',
-        data: [65000, 78000, 85000, 92000, 88000, 95000],
+        data: salesTrendRows.map((row: any) => row.value),
         borderColor: isDarkMode ? 'rgba(96, 165, 250, 1)' : 'rgba(59, 130, 246, 1)',
         backgroundColor: isDarkMode ? 'rgba(96, 165, 250, 0.1)' : 'rgba(59, 130, 246, 0.1)',
         fill: true,
@@ -172,11 +172,12 @@ const DashboardPage = () => {
     ],
   };
 
+  const categoryRows = (dashboardData as any).categoryPerformance || [];
   const categoryPerformanceData = {
-    labels: ['Electronics', 'Clothing', 'Food', 'Books', 'Home'],
+    labels: categoryRows.map((row: any) => row.category),
     datasets: [
       {
-        data: [35, 25, 20, 12, 8],
+        data: categoryRows.map((row: any) => row.sales),
         backgroundColor: [
           isDarkMode ? 'rgba(96, 165, 250, 0.8)' : 'rgba(59, 130, 246, 0.8)',
           isDarkMode ? 'rgba(34, 197, 94, 0.8)' : 'rgba(34, 197, 94, 0.8)',
@@ -189,12 +190,13 @@ const DashboardPage = () => {
     ],
   };
 
+  const hourlyRows = (dashboardData as any).hourlyTraffic || [];
   const hourlyTrafficData = {
-    labels: ['6AM', '9AM', '12PM', '3PM', '6PM', '9PM'],
+    labels: hourlyRows.map((row: any) => row.label),
     datasets: [
       {
         label: 'Customers',
-        data: [12, 35, 58, 42, 67, 28],
+        data: hourlyRows.map((row: any) => row.customers),
         backgroundColor: isDarkMode ? 'rgba(34, 197, 94, 0.8)' : 'rgba(34, 197, 94, 0.8)',
         borderColor: isDarkMode ? 'rgba(34, 197, 94, 1)' : 'rgba(34, 197, 94, 1)',
         borderWidth: 2,
@@ -203,11 +205,17 @@ const DashboardPage = () => {
     ],
   };
 
+  const inventoryStatus = (dashboardData as any).inventoryStatus || {};
   const inventoryStatusData = {
     labels: ['In Stock', 'Low Stock', 'Out of Stock', 'Overstocked'],
     datasets: [
       {
-        data: [65, 20, 8, 7],
+        data: [
+          inventoryStatus.inStock ?? 65,
+          inventoryStatus.lowStock ?? 20,
+          inventoryStatus.outOfStock ?? 8,
+          inventoryStatus.overstocked ?? 7
+        ],
         backgroundColor: [
           isDarkMode ? 'rgba(34, 197, 94, 0.8)' : 'rgba(34, 197, 94, 0.8)',
           isDarkMode ? 'rgba(251, 191, 36, 0.8)' : 'rgba(251, 191, 36, 0.8)',
@@ -226,7 +234,7 @@ const DashboardPage = () => {
         <DashboardCard 
           title="Today's Sales" 
           value={`₹${(dashboardData.salesSummary?.today || 0).toLocaleString('en-IN')}`} 
-          icon={<DollarSign size={24} className="text-white" />}
+          icon={<IndianRupee size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-primary-500 to-primary-600"
           trend={{ value: "+5.2% from yesterday", isPositive: true }}
           subtitle="Daily revenue"
@@ -248,7 +256,7 @@ const DashboardPage = () => {
         />
         <DashboardCard 
           title="Active Customers" 
-          value="1,234" 
+          value={((dashboardData as any).customerSummary?.activeCustomers || 0).toString()} 
           icon={<Users size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-purple-500 to-purple-600"
           trend={{ value: "+8.1% this month", isPositive: true }}
@@ -261,14 +269,22 @@ const DashboardPage = () => {
         <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Sales Trend</h2>
           <div className="h-64">
-            <Line data={salesTrendData} options={chartOptions} />
+            {salesTrendRows.length ? (
+              <Line data={salesTrendData} options={chartOptions} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">No sales trend data</div>
+            )}
           </div>
         </div>
         
         <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Category Performance</h2>
           <div className="h-64">
-            <Doughnut data={categoryPerformanceData} options={{...chartOptions, cutout: '60%'}} />
+            {categoryRows.length ? (
+              <Doughnut data={categoryPerformanceData} options={{...chartOptions, cutout: '60%'}} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">No category data</div>
+            )}
           </div>
         </div>
       </div>
@@ -324,28 +340,28 @@ const DashboardPage = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <DashboardCard 
           title="Total Revenue" 
-          value="₹2,45,680" 
-          icon={<DollarSign size={24} className="text-white" />}
+          value={`₹${((dashboardData.salesSummary?.thisMonth || 0) as number).toLocaleString('en-IN')}`} 
+          icon={<IndianRupee size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-green-500 to-green-600"
           trend={{ value: "+15.3% vs last month", isPositive: true }}
         />
         <DashboardCard 
           title="Average Order Value" 
-          value="₹1,250" 
+          value={`₹${Number((dashboardData as any).performance?.averageOrderValue || 0).toLocaleString('en-IN')}`} 
           icon={<Target size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-blue-500 to-blue-600"
           trend={{ value: "+8.2% vs last month", isPositive: true }}
         />
         <DashboardCard 
           title="Total Orders" 
-          value="1,847" 
+          value={Number((dashboardData as any).performance?.totalOrders || 0).toString()} 
           icon={<ShoppingBag size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-purple-500 to-purple-600"
           trend={{ value: "+12.1% vs last month", isPositive: true }}
         />
         <DashboardCard 
           title="Conversion Rate" 
-          value="68.5%" 
+          value={`${Number((dashboardData as any).trendMetrics?.growthRate || 0).toFixed(1)}%`} 
           icon={<Zap size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-orange-500 to-orange-600"
           trend={{ value: "+2.3% vs last month", isPositive: true }}
@@ -357,14 +373,22 @@ const DashboardPage = () => {
         <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Revenue Trend</h2>
           <div className="h-80">
-            <Line data={salesTrendData} options={chartOptions} />
+            {salesTrendRows.length ? (
+              <Line data={salesTrendData} options={chartOptions} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">No revenue trend data</div>
+            )}
           </div>
         </div>
         
         <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Hourly Traffic</h2>
           <div className="h-80">
-            <Bar data={hourlyTrafficData} options={chartOptions} />
+            {hourlyRows.length ? (
+              <Bar data={hourlyTrafficData} options={chartOptions} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">No hourly traffic data</div>
+            )}
           </div>
         </div>
       </div>
@@ -419,8 +443,8 @@ const DashboardPage = () => {
         />
         <DashboardCard 
           title="Inventory Value" 
-          value="₹8,45,230" 
-          icon={<DollarSign size={24} className="text-white" />}
+          value={`₹${Number((dashboardData as any).inventorySummary?.inventoryValue || 0).toLocaleString('en-IN')}`} 
+          icon={<IndianRupee size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-green-500 to-green-600"
         />
       </div>
@@ -446,31 +470,34 @@ const DashboardPage = () => {
       <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
         <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Stock Alerts</h2>
         <div className="space-y-3">
-          <div className="flex items-center justify-between p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
-            <div className="flex items-center">
-              <AlertTriangle size={20} className="text-red-600 dark:text-red-400 mr-3" />
-              <div>
-                <p className="font-medium text-red-800 dark:text-red-200">Organic Milk 1L</p>
-                <p className="text-sm text-red-600 dark:text-red-400">Out of stock</p>
+          {((dashboardData as any).stockAlerts || []).slice(0, 6).map((alert: any, idx: number) => {
+            const isOut = alert.status === 'out_of_stock';
+            return (
+              <div
+                key={`${alert.productName}-${idx}`}
+                className={`flex items-center justify-between p-4 rounded-lg border ${
+                  isOut
+                    ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+                    : 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'
+                }`}
+              >
+                <div className="flex items-center">
+                  <AlertTriangle
+                    size={20}
+                    className={isOut ? 'text-red-600 dark:text-red-400 mr-3' : 'text-yellow-600 dark:text-yellow-400 mr-3'}
+                  />
+                  <div>
+                    <p className={isOut ? 'font-medium text-red-800 dark:text-red-200' : 'font-medium text-yellow-800 dark:text-yellow-200'}>
+                      {alert.productName}
+                    </p>
+                    <p className={isOut ? 'text-sm text-red-600 dark:text-red-400' : 'text-sm text-yellow-600 dark:text-yellow-400'}>
+                      {isOut ? 'Out of stock' : `Low stock: ${alert.quantity} remaining`}
+                    </p>
+                  </div>
+                </div>
               </div>
-            </div>
-            <button className="px-3 py-1 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">
-              Reorder
-            </button>
-          </div>
-          
-          <div className="flex items-center justify-between p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800">
-            <div className="flex items-center">
-              <AlertTriangle size={20} className="text-yellow-600 dark:text-yellow-400 mr-3" />
-              <div>
-                <p className="font-medium text-yellow-800 dark:text-yellow-200">Whole Wheat Bread</p>
-                <p className="text-sm text-yellow-600 dark:text-yellow-400">Low stock: 5 remaining</p>
-              </div>
-            </div>
-            <button className="px-3 py-1 bg-yellow-600 text-white rounded-lg text-sm hover:bg-yellow-700">
-              Reorder
-            </button>
-          </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -482,29 +509,29 @@ const DashboardPage = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <DashboardCard 
           title="Total Customers" 
-          value="2,847" 
+          value={Number((dashboardData as any).customerSummary?.totalCustomers || 0).toString()} 
           icon={<Users size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-purple-500 to-purple-600"
           trend={{ value: "+12.5% this month", isPositive: true }}
         />
         <DashboardCard 
           title="New Customers" 
-          value="156" 
+          value={Number((dashboardData as any).customerSummary?.newCustomers || 0).toString()} 
           icon={<Users size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-green-500 to-green-600"
           trend={{ value: "+8.3% vs last month", isPositive: true }}
         />
         <DashboardCard 
           title="Returning Customers" 
-          value="1,234" 
+          value={Number((dashboardData as any).customerSummary?.activeCustomers || 0).toString()} 
           icon={<Users size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-blue-500 to-blue-600"
           trend={{ value: "+15.2% vs last month", isPositive: true }}
         />
         <DashboardCard 
           title="Customer Lifetime Value" 
-          value="₹4,250" 
-          icon={<DollarSign size={24} className="text-white" />}
+          value={`₹${Number((dashboardData as any).customerSummary?.customerLifetimeValue || 0).toLocaleString('en-IN')}`} 
+          icon={<IndianRupee size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-orange-500 to-orange-600"
           trend={{ value: "+5.8% vs last month", isPositive: true }}
         />
@@ -515,7 +542,11 @@ const DashboardPage = () => {
         <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Customer Acquisition</h2>
           <div className="h-80">
-            <Line data={salesTrendData} options={chartOptions} />
+            {salesTrendRows.length ? (
+              <Line data={salesTrendData} options={chartOptions} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">No customer trend data</div>
+            )}
           </div>
         </div>
         
@@ -542,12 +573,7 @@ const DashboardPage = () => {
       <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
         <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Top Customers</h2>
         <div className="space-y-4">
-          {[
-            { name: 'Rajesh Kumar', purchases: 45, amount: 28500, loyalty: 'Gold' },
-            { name: 'Priya Sharma', purchases: 32, amount: 19200, loyalty: 'Silver' },
-            { name: 'Amit Singh', purchases: 58, amount: 36500, loyalty: 'Gold' },
-            { name: 'Sunita Patel', purchases: 23, amount: 15600, loyalty: 'Silver' },
-          ].map((customer, index) => (
+          {((dashboardData as any).topCustomers || []).slice(0, 10).map((customer: any, index: number) => (
             <div key={index} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
               <div className="flex items-center">
                 <div className="h-10 w-10 bg-primary-100 dark:bg-primary-900 rounded-full flex items-center justify-center text-primary-600 dark:text-primary-400 font-bold mr-4">
@@ -560,13 +586,6 @@ const DashboardPage = () => {
               </div>
               <div className="text-right">
                 <p className="font-semibold text-gray-800 dark:text-gray-100">₹{customer.amount.toLocaleString('en-IN')}</p>
-                <span className={`text-xs px-2 py-1 rounded-full ${
-                  customer.loyalty === 'Gold' 
-                    ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-400'
-                    : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
-                }`}>
-                  {customer.loyalty}
-                </span>
               </div>
             </div>
           ))}
@@ -581,28 +600,28 @@ const DashboardPage = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <DashboardCard 
           title="Daily Target" 
-          value="85%" 
+          value={`${Number((dashboardData as any).performance?.dailyTarget || 0).toFixed(0)}%`} 
           icon={<Target size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-green-500 to-green-600"
           trend={{ value: "+5% vs yesterday", isPositive: true }}
         />
         <DashboardCard 
           title="Monthly Target" 
-          value="92%" 
+          value={`${Number((dashboardData as any).performance?.monthlyTarget || 0).toFixed(0)}%`} 
           icon={<Target size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-blue-500 to-blue-600"
           trend={{ value: "+12% vs last month", isPositive: true }}
         />
         <DashboardCard 
           title="Profit Margin" 
-          value="24.5%" 
+          value={`${Number((dashboardData as any).performance?.profitMargin || 0).toFixed(1)}%`} 
           icon={<TrendingUp size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-purple-500 to-purple-600"
           trend={{ value: "+2.1% vs last month", isPositive: true }}
         />
         <DashboardCard 
           title="Efficiency Score" 
-          value="88%" 
+          value={`${Number((dashboardData as any).performance?.efficiencyScore || 0).toFixed(0)}%`} 
           icon={<Activity size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-orange-500 to-orange-600"
           trend={{ value: "+3.2% vs last month", isPositive: true }}
@@ -686,28 +705,28 @@ const DashboardPage = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <DashboardCard 
           title="Growth Rate" 
-          value="15.3%" 
+          value={`${Number((dashboardData as any).trendMetrics?.growthRate || 0).toFixed(1)}%`} 
           icon={<TrendingUp size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-green-500 to-green-600"
           trend={{ value: "+2.1% vs last quarter", isPositive: true }}
         />
         <DashboardCard 
           title="Market Share" 
-          value="12.8%" 
+          value={`${Number((dashboardData as any).trendMetrics?.marketShare || 0).toFixed(1)}%`} 
           icon={<PieChart size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-blue-500 to-blue-600"
           trend={{ value: "+0.8% vs last quarter", isPositive: true }}
         />
         <DashboardCard 
           title="Seasonal Index" 
-          value="1.25" 
+          value={`${Number((dashboardData as any).trendMetrics?.seasonalIndex || 0).toFixed(2)}`} 
           icon={<Calendar size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-purple-500 to-purple-600"
           trend={{ value: "+0.15 vs last year", isPositive: true }}
         />
         <DashboardCard 
           title="Forecast Accuracy" 
-          value="94.2%" 
+          value={`${Number((dashboardData as any).trendMetrics?.forecastAccuracy || 0).toFixed(1)}%`} 
           icon={<Activity size={24} className="text-white" />}
           iconBgColor="bg-gradient-to-br from-orange-500 to-orange-600"
           trend={{ value: "+1.8% vs last month", isPositive: true }}
@@ -719,36 +738,22 @@ const DashboardPage = () => {
         <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Yearly Growth Trend</h2>
           <div className="h-80">
-            <Line data={{
-              labels: ['2020', '2021', '2022', '2023', '2024'],
-              datasets: [{
-                label: 'Revenue Growth',
-                data: [100, 115, 132, 148, 171],
-                borderColor: 'rgba(34, 197, 94, 1)',
-                backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                fill: true,
-                tension: 0.4,
-              }]
-            }} options={chartOptions} />
+            {salesTrendRows.length ? (
+              <Line data={salesTrendData} options={chartOptions} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">No growth trend data</div>
+            )}
           </div>
         </div>
         
         <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Seasonal Patterns</h2>
           <div className="h-80">
-            <Bar data={{
-              labels: ['Q1', 'Q2', 'Q3', 'Q4'],
-              datasets: [{
-                label: 'Sales Volume',
-                data: [85, 92, 78, 105],
-                backgroundColor: [
-                  'rgba(59, 130, 246, 0.8)',
-                  'rgba(34, 197, 94, 0.8)',
-                  'rgba(251, 191, 36, 0.8)',
-                  'rgba(239, 68, 68, 0.8)',
-                ],
-              }]
-            }} options={chartOptions} />
+            {hourlyRows.length ? (
+              <Bar data={hourlyTrafficData} options={chartOptions} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">No seasonal pattern data</div>
+            )}
           </div>
         </div>
       </div>
@@ -763,7 +768,7 @@ const DashboardPage = () => {
               <h3 className="font-medium text-green-800 dark:text-green-200">Strong Growth</h3>
             </div>
             <p className="text-sm text-green-700 dark:text-green-300">
-              Revenue has grown consistently by 15% quarter-over-quarter
+              Growth rate is {Number((dashboardData as any).trendMetrics?.growthRate || 0).toFixed(1)}% for selected range
             </p>
           </div>
           
@@ -773,7 +778,7 @@ const DashboardPage = () => {
               <h3 className="font-medium text-blue-800 dark:text-blue-200">Seasonal Peak</h3>
             </div>
             <p className="text-sm text-blue-700 dark:text-blue-300">
-              Q4 shows 25% higher sales due to holiday season
+              Forecast accuracy is {Number((dashboardData as any).trendMetrics?.forecastAccuracy || 0).toFixed(1)}%
             </p>
           </div>
           
@@ -783,7 +788,7 @@ const DashboardPage = () => {
               <h3 className="font-medium text-purple-800 dark:text-purple-200">Market Expansion</h3>
             </div>
             <p className="text-sm text-purple-700 dark:text-purple-300">
-              Market share increased by 0.8% this quarter
+              Active customers: {Number((dashboardData as any).customerSummary?.activeCustomers || 0).toLocaleString('en-IN')}
             </p>
           </div>
         </div>
@@ -809,14 +814,24 @@ const DashboardPage = () => {
         <div>
           <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Analytics Dashboard</h1>
           <p className="text-gray-600 dark:text-gray-400">Comprehensive business insights and metrics</p>
+          <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+            Range: {(dashboardData as any)?.meta?.allTime
+              ? 'All time'
+              : `${(dashboardData as any)?.meta?.startDate || '-'} to ${(dashboardData as any)?.meta?.endDate || '-'}`}
+          </p>
         </div>
         
         <div className="mt-4 sm:mt-0">
-          <select className="px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-gray-900 dark:text-gray-100">
-            <option>Last 30 days</option>
-            <option>Last 7 days</option>
-            <option>Last 90 days</option>
-            <option>This year</option>
+          <select
+            value={selectedTimeRange}
+            onChange={(e) => setTimeRange(e.target.value)}
+            className="px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-gray-900 dark:text-gray-100"
+          >
+            <option value="alltime">All time</option>
+            <option value="last30days">Last 30 days</option>
+            <option value="last7days">Last 7 days</option>
+            <option value="last90days">Last 90 days</option>
+            <option value="thisyear">This year</option>
           </select>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CreditCard, DollarSign, Smartphone, X } from 'lucide-react';
+import { CreditCard, IndianRupee, Smartphone, X } from 'lucide-react';
 import { toast } from 'react-toastify';
 import * as salesService from '../../service/salesService';
 import { BillItem } from '../../types';
@@ -55,13 +55,23 @@ const PaymentModal = ({
       if (resumedBillId) {
         billId = resumedBillId;
       } else {
+        const validItems = items
+          .map((item) => ({
+            product_id: item.productId,
+            quantity: Number(item.quantity),
+            discount_rate: Number(item.discountRate || 0),
+          }))
+          .filter((item) => Number.isFinite(item.quantity) && item.quantity > 0 && !!item.product_id);
+
+        if (validItems.length === 0) {
+          setError('Cannot create bill without valid items.');
+          setLoading(false);
+          return;
+        }
+
         const billPayload = {
           customer_id: customerId,
-          items: items.map((item) => ({
-            product_id: item.productId,
-            quantity: item.quantity,
-            bill_discount: item.discountRate || 0,
-          })),
+          items: validItems,
           bill_discount: discount || 0,
           points_to_redeem: pointsToRedeem || 0,
         };
@@ -70,22 +80,22 @@ const PaymentModal = ({
         billId = createdBill.id;
       }
 
-      await salesService.addPayment({
-        bill: billId,
-        amount: paymentMethod === 'cash' ? parseFloat(cashReceived) : total,
-        payment_method: paymentMethod,
-      });
-
-      // ✅ Send payment_method in completeBill API
+      // completeBill handles payment recording for outstanding amount
       await salesService.completeBill(billId, paymentMethod);
 
       const completedBill = await salesService.getBill(billId);
       toast.success('Payment completed and bill generated successfully');
       onComplete(completedBill);
       onClose();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toast.error('Failed to complete payment');
+      const detail =
+        err?.response?.data?.detail ||
+        err?.response?.data?.items ||
+        (typeof err?.response?.data === 'object' ? JSON.stringify(err.response.data) : null) ||
+        'Failed to complete payment';
+      setError(typeof detail === 'string' ? detail : 'Failed to complete payment');
+      toast.error(typeof detail === 'string' ? detail : 'Failed to complete payment');
     } finally {
       setLoading(false);
     }
@@ -119,7 +129,7 @@ const PaymentModal = ({
             <p className="font-medium text-gray-700">Select Payment Method</p>
             <div className="grid grid-cols-3 gap-3">
               {['cash', 'card', 'upi'].map((method) => {
-                const Icon = method === 'cash' ? DollarSign : method === 'card' ? CreditCard : Smartphone;
+                const Icon = method === 'cash' ? IndianRupee : method === 'card' ? CreditCard : Smartphone;
                 const label = method.charAt(0).toUpperCase() + method.slice(1);
                 return (
                   <button

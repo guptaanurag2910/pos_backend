@@ -82,6 +82,26 @@ export const deleteStore = async (id: number): Promise<void> => {
   await axiosInstance.delete(`${STORE_URL}${id}/`);
 };
 
+export const listActiveStores = async (): Promise<Store[]> => {
+  const res = await axiosInstance.get(`${STORE_URL}active/`);
+  return res.data;
+};
+
+export const activateStore = async (id: number): Promise<Store> => {
+  const res = await axiosInstance.post(`${STORE_URL}${id}/activate/`);
+  return res.data;
+};
+
+export const deactivateStore = async (id: number): Promise<Store> => {
+  const res = await axiosInstance.post(`${STORE_URL}${id}/deactivate/`);
+  return res.data;
+};
+
+export const setMainStore = async (id: number): Promise<Store> => {
+  const res = await axiosInstance.post(`${STORE_URL}${id}/set_main/`);
+  return res.data;
+};
+
 // Get store settings
 export const getStoreSettings = async (
   storeId: number
@@ -111,5 +131,28 @@ export const patchStoreSettings = async (
     `${STORE_URL}${storeId}/settings/`,
     data
   );
+  return res.data;
+};
+
+export interface StoreBootstrapImportResponse {
+  store_id: number;
+  strict_mode: boolean;
+  stats: Record<string, { processed: number; created: number; updated: number; failed: number }>;
+  errors: Array<{ section: string; row: number; error: string }>;
+  sheets_found: Record<string, boolean>;
+}
+
+export const bootstrapStoreImport = async (
+  storeId: number,
+  file: File,
+  strict = true
+): Promise<StoreBootstrapImportResponse> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('strict', String(strict));
+
+  const res = await axiosInstance.post(`${STORE_URL}${storeId}/bootstrap-import/`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
   return res.data;
 };

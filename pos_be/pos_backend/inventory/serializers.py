@@ -1,11 +1,25 @@
 from rest_framework import serializers
 from django.db.models import Sum
+from django.utils.text import slugify
 from .models import (
     Category, Product, StockRecord, StockLevel,
     StockTransfer, StockTransferItem, InventoryUpload
 )
 
 class CategorySerializer(serializers.ModelSerializer):
+    def validate(self, attrs):
+        name = attrs.get('name')
+        if not name:
+            return attrs
+
+        slug = slugify(name)
+        qs = Category.objects.filter(slug=slug)
+        if self.instance:
+            qs = qs.exclude(id=self.instance.id)
+        if qs.exists():
+            raise serializers.ValidationError({'name': 'Category with this name/slug already exists.'})
+        return attrs
+
     class Meta:
         model = Category
         fields = ('id', 'name', 'slug', 'parent', 'description', 'is_active')

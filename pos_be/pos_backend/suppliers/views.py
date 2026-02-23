@@ -7,6 +7,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.db import transaction, models
 from django.utils import timezone
 from django.db.models import Q
+from decimal import Decimal, InvalidOperation
 
 from .models import (
     Supplier, PurchaseOrder, PurchaseOrderItem, 
@@ -21,6 +22,46 @@ from .serializers import (
 from accounts.permissions import IsManagerUser
 from accounts.models import AuditLog
 from accounts.utils import get_client_ip
+from stores.models import Store
+
+
+def _to_decimal(value, default='0'):
+    try:
+        if value is None or value == '':
+            return Decimal(default)
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal(default)
+
+
+def _resolve_store(request):
+    """
+    Resolve store for create flows:
+    1) request.user.store
+    2) explicit request.data['store']
+    3) main active store
+    4) first active store
+    """
+    user_store = getattr(request.user, 'store', None)
+    if user_store:
+        return user_store
+
+    store_id = request.data.get('store')
+    if store_id:
+        try:
+            return Store.objects.get(id=store_id, is_active=True)
+        except Store.DoesNotExist:
+            raise ValidationError({"store": "Invalid or inactive store."})
+
+    fallback = Store.objects.filter(is_main=True, is_active=True).first()
+    if not fallback:
+        fallback = Store.objects.filter(is_active=True).order_by('id').first()
+    if fallback:
+        return fallback
+
+    raise ValidationError(
+        {"store": "No active store found. Assign a store to this user or create an active store."}
+    )
 
 class SupplierViewSet(viewsets.ModelViewSet):
     queryset = Supplier.objects.all()
@@ -76,6 +117,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if user.role == 'admin':
             return PurchaseOrder.objects.all()
+        if not getattr(user, 'store', None):
+            return PurchaseOrder.objects.none()
         return PurchaseOrder.objects.filter(store=user.store)
     
     @action(detail=True, methods=['post'])
@@ -114,7 +157,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         with transaction.atomic():
             # Generate PO number
-            store = self.request.user.store
+            store = _resolve_store(self.request)
             today = timezone.now().strftime('%Y%m%d')
 
             last_po = PurchaseOrder.objects.filter(
@@ -244,6 +287,8 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if user.role == 'admin':
             return GoodsReceiptNote.objects.all()
+        if not getattr(user, 'store', None):
+            return GoodsReceiptNote.objects.none()
         return GoodsReceiptNote.objects.filter(store=user.store)
 
     def update(self, request, *args, **kwargs):
@@ -299,12 +344,12 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
                         None
                     )
                     if matched_grn_item:
-                        po_item_obj.quantity_received += matched_grn_item.get('received_quantity', 0)
-                        po_item_obj.discount_percentage = matched_grn_item.get('discount_percentage', 0)
-                        po_item_obj.discount_amount = matched_grn_item.get('discount_amount', 0)
-                        po_item_obj.tax_rate = matched_grn_item.get('tax_rate', 0)
-                        po_item_obj.tax_amount = matched_grn_item.get('tax_amount', 0)
-                        po_item_obj.total = matched_grn_item.get('total', 0)
+                        po_item_obj.quantity_received += _to_decimal(matched_grn_item.get('received_quantity', 0))
+                        po_item_obj.discount_percentage = _to_decimal(matched_grn_item.get('discount_percentage', 0))
+                        po_item_obj.discount_amount = _to_decimal(matched_grn_item.get('discount_amount', 0))
+                        po_item_obj.tax_rate = _to_decimal(matched_grn_item.get('tax_rate', 0))
+                        po_item_obj.tax_amount = _to_decimal(matched_grn_item.get('tax_amount', 0))
+                        po_item_obj.total = _to_decimal(matched_grn_item.get('total', 0))
                         po_item_obj.save()
 
                 except PurchaseOrderItem.DoesNotExist:
@@ -407,7 +452,7 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         with transaction.atomic():
-            store = self.request.user.store
+            store = _resolve_store(self.request)
             today = timezone.now().strftime('%Y%m%d')
 
             last_grn = GoodsReceiptNote.objects.filter(
@@ -454,12 +499,12 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
                     # find corresponding received item
                     matched_grn_item = next((i for i in items_data if i['product_id'] == product_id), None)
                     if matched_grn_item:
-                        po_item_obj.quantity_received += matched_grn_item['received_quantity']
-                        po_item_obj.discount_percentage = matched_grn_item['discount_percentage']
-                        po_item_obj.discount_amount = matched_grn_item['discount_amount']
-                        po_item_obj.tax_rate = matched_grn_item['tax_rate']
-                        po_item_obj.tax_amount = matched_grn_item['tax_amount']
-                        po_item_obj.total = matched_grn_item['total']
+                        po_item_obj.quantity_received += _to_decimal(matched_grn_item.get('received_quantity', 0))
+                        po_item_obj.discount_percentage = _to_decimal(matched_grn_item.get('discount_percentage', 0))
+                        po_item_obj.discount_amount = _to_decimal(matched_grn_item.get('discount_amount', 0))
+                        po_item_obj.tax_rate = _to_decimal(matched_grn_item.get('tax_rate', 0))
+                        po_item_obj.tax_amount = _to_decimal(matched_grn_item.get('tax_amount', 0))
+                        po_item_obj.total = _to_decimal(matched_grn_item.get('total', 0))
                         po_item_obj.save()
                 except PurchaseOrderItem.DoesNotExist:
                     pass  # ignore if not found
@@ -528,11 +573,13 @@ class SupplierInvoiceViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if user.role == 'admin':
             return SupplierInvoice.objects.all().order_by('-created_at')
+        if not getattr(user, 'store', None):
+            return SupplierInvoice.objects.none()
         return SupplierInvoice.objects.filter(Q(store=user.store) | Q(store__isnull=True)).order_by('-created_at')
 
     def perform_create(self, serializer):
         with transaction.atomic():
-            store = self.request.user.store
+            store = _resolve_store(self.request)
             supplier = serializer.validated_data.get('supplier')
 
             if not serializer.validated_data.get('invoice_number'):

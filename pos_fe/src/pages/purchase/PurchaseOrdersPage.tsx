@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  Plus, Search, Filter, Clock, CheckCircle, Truck, Eye, Edit, Trash, Send
+  Plus, Search, Clock, CheckCircle, Truck, Eye, Trash, Send
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -76,7 +76,7 @@ const PurchaseOrdersPage = () => {
 
       {/* Filters */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="relative">
             <Search className="absolute left-3 top-3 text-gray-400" size={18} />
             <input
@@ -98,13 +98,6 @@ const PurchaseOrdersPage = () => {
             <option value="partially_received">Partially Received</option>
             <option value="received">Received</option>
           </select>
-          <input
-            type="date"
-            className="px-3 py-2 border rounded-lg bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
-          />
-          <button className="flex items-center justify-center px-4 py-2 border rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">
-            <Filter size={18} className="mr-2" /> More Filters
-          </button>
         </div>
       </div>
 
@@ -137,15 +130,24 @@ const PurchaseOrdersPage = () => {
                 </td>
                 {/* Items Progress */}
                 <td className="px-6 py-4">
-                  <div className="text-sm text-gray-900 dark:text-gray-100">
-                    {po.received_items}/{po.items_count} received
-                  </div>
-                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mt-1">
-                    <div
-                      className="bg-primary-600 h-2 rounded-full"
-                      style={{ width: `${(po.received_items / po.items_count) * 100}%` }}
-                    />
-                  </div>
+                  {(() => {
+                    const totalItems = Number(po.items_count) || 0;
+                    const receivedItems = Number(po.received_items) || 0;
+                    const progress = totalItems > 0 ? (receivedItems / totalItems) * 100 : 0;
+                    return (
+                      <>
+                        <div className="text-sm text-gray-900 dark:text-gray-100">
+                          {receivedItems}/{totalItems} received
+                        </div>
+                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mt-1">
+                          <div
+                            className="bg-primary-600 h-2 rounded-full"
+                            style={{ width: `${progress}%` }}
+                          />
+                        </div>
+                      </>
+                    );
+                  })()}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">₹{Number(po.total).toLocaleString('en-IN')}</td>
                 <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-200">
@@ -154,7 +156,6 @@ const PurchaseOrdersPage = () => {
                 <td className="px-6 py-4 text-right">
                   <div className="flex justify-end space-x-2">
                     <button onClick={() => navigate(`/purchase-orders/${po.id}`)} className="text-blue-600 hover:text-blue-800"><Eye size={16} /></button>
-                    <button onClick={() => navigate(`/purchase-orders/${po.id}`)} className="text-gray-600 hover:text-gray-800"><Edit size={16} /></button>
                     <button onClick={() => setDeleteId(po.id)} className="text-red-600 hover:text-red-800"><Trash size={16} /></button>
                   </div>
                 </td>

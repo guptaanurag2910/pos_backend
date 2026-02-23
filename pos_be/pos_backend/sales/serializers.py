@@ -57,15 +57,25 @@ class PaymentSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ('id', 'created_by', 'created_at', 'updated_at')
 
-class BillItemCreateSerializer(serializers.ModelSerializer):
-    product_id = serializers.PrimaryKeyRelatedField(
-        queryset=Product.objects.all(),
-        source='product'
-    )
-    
-    class Meta:
-        model = BillItem
-        fields = ('product_id', 'quantity', 'discount_rate')
+class BillItemCreateSerializer(serializers.Serializer):
+    # Accept both product_id (current) and product (legacy) for compatibility.
+    product_id = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all(), required=False)
+    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all(), required=False)
+    quantity = serializers.DecimalField(max_digits=10, decimal_places=2)
+    discount_rate = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=0)
+
+    def validate(self, attrs):
+        product = attrs.get('product_id') or attrs.get('product')
+        if product is None:
+            raise serializers.ValidationError({'product_id': 'Either product_id or product is required.'})
+
+        quantity = attrs.get('quantity')
+        if quantity is None or quantity <= 0:
+            raise serializers.ValidationError({'quantity': 'Quantity must be greater than zero.'})
+
+        attrs['product'] = product
+        attrs.pop('product_id', None)
+        return attrs
 
 class CreateBillSerializer(serializers.ModelSerializer):
     items = BillItemCreateSerializer(many=True)
@@ -83,6 +93,18 @@ class CreateBillSerializer(serializers.ModelSerializer):
     class Meta:
         model = Bill
         fields = ('customer_id', 'notes', 'items', 'points_to_redeem', 'bill_discount')
+
+    def validate(self, attrs):
+        items = attrs.get('items') or []
+        if len(items) == 0:
+            raise serializers.ValidationError({'items': 'At least one item is required to create a bill.'})
+
+        for idx, item in enumerate(items, start=1):
+            quantity = item.get('quantity')
+            if quantity is None or quantity <= 0:
+                raise serializers.ValidationError({'items': f'Item #{idx} must have quantity greater than zero.'})
+
+        return attrs
 
     def create(self, validated_data):
         items_data = validated_data.pop('items')

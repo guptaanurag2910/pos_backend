@@ -3,7 +3,7 @@ from rest_framework_nested import routers
 from .views import (
     SupplierViewSet, PurchaseOrderViewSet, PurchaseOrderItemViewSet,
     GoodsReceiptNoteViewSet, GoodsReceiptNoteItemViewSet, SupplierInvoiceViewSet,
-    SupplierPaymentViewSet
+    SupplierPaymentViewSet, SupplierInvoiceItemViewSet
 )
 
 router = routers.DefaultRouter()
@@ -19,8 +19,12 @@ po_router.register(r'items', PurchaseOrderItemViewSet, basename='purchase-order-
 grn_router = routers.NestedSimpleRouter(router, r'grn', lookup='grn')
 grn_router.register(r'items', GoodsReceiptNoteItemViewSet, basename='grn-item')
 
+invoice_router = routers.NestedSimpleRouter(router, r'supplier-invoices', lookup='invoice')
+invoice_router.register(r'items', SupplierInvoiceItemViewSet, basename='supplier-invoice-item')
+
 urlpatterns = [
     path('', include(router.urls)),
     path('', include(po_router.urls)),
     path('', include(grn_router.urls)),
+    path('', include(invoice_router.urls)),
 ]

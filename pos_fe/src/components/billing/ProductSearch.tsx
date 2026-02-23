@@ -5,9 +5,10 @@ import { listProducts } from '../../service/inventoryService';
 
 interface ProductSearchProps {
   onSelectProduct: (product: Product) => void;
+  inputRef?: React.RefObject<HTMLInputElement>;
 }
 
-const ProductSearch = ({ onSelectProduct }: ProductSearchProps) => {
+const ProductSearch = ({ onSelectProduct, inputRef }: ProductSearchProps) => {
   const [query, setQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -117,6 +118,7 @@ const ProductSearch = ({ onSelectProduct }: ProductSearchProps) => {
         </div>
 
         <input
+          ref={inputRef}
           type="text"
           placeholder="Search or scan barcode..."
           value={query}

@@ -18,17 +18,24 @@ class CustomerViewSet(viewsets.ModelViewSet):
     serializer_class = CustomerSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['city', 'state']
+    filterset_fields = ['city', 'state', 'is_active']
     search_fields = ['name', 'phone', 'email', 'gst_number']
     ordering_fields = ['name', 'loyalty_points', 'total_purchases', 'last_purchase', 'created_at']
     ordering = ['name']
     
     def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'merge']:
             permission_classes = [IsManagerUser]
         else:
             permission_classes = [IsAuthenticated]
         return [permission() for permission in permission_classes]
+
+    def get_queryset(self):
+        queryset = Customer.objects.all()
+        include_inactive = str(self.request.query_params.get('include_inactive', 'false')).lower() == 'true'
+        if not include_inactive:
+            queryset = queryset.filter(is_active=True)
+        return queryset.order_by('name', 'id')
     
     @action(detail=True, methods=['get'])
     def purchase_history(self, request, pk=None):
@@ -60,6 +67,13 @@ class CustomerViewSet(viewsets.ModelViewSet):
             )
         
         with transaction.atomic():
+            new_balance = customer.loyalty_points + points
+            if new_balance < 0:
+                return Response(
+                    {"detail": "Insufficient loyalty points for deduction"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             customer.loyalty_points += points
             customer.save()
             
@@ -109,6 +123,20 @@ class CustomerViewSet(viewsets.ModelViewSet):
                 object_repr=customer.name,
                 ip_address=get_client_ip(self.request)
             )
+
+    def perform_destroy(self, instance):
+        with transaction.atomic():
+            instance.is_active = False
+            instance.save(update_fields=['is_active', 'updated_at'])
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='update',
+                model_name='Customer',
+                object_id=str(instance.id),
+                object_repr=instance.name,
+                ip_address=get_client_ip(self.request),
+                details={'action': 'soft_delete'}
+            )
     
     @action(detail=False, methods=['get'])
     def stats(self, request):
@@ -137,6 +165,69 @@ class CustomerViewSet(viewsets.ModelViewSet):
             'top_by_amount': top_by_amount_data,
             'top_by_points': top_by_points_data
         })
+
+    @action(detail=False, methods=['post'])
+    def merge(self, request):
+        primary_id = request.data.get('primary_customer_id')
+        duplicate_ids = request.data.get('duplicate_customer_ids', [])
+
+        if not primary_id or not isinstance(duplicate_ids, list) or not duplicate_ids:
+            return Response(
+                {"detail": "primary_customer_id and duplicate_customer_ids are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if primary_id in duplicate_ids:
+            return Response({"detail": "primary customer cannot be in duplicates."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            primary = Customer.objects.get(id=primary_id)
+        except Customer.DoesNotExist:
+            return Response({"detail": "Primary customer not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        duplicates = Customer.objects.filter(id__in=duplicate_ids, is_active=True).exclude(id=primary.id)
+        if not duplicates.exists():
+            return Response({"detail": "No valid active duplicate customers found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            merged_ids = list(duplicates.values_list('id', flat=True))
+
+            # Re-assign bills to primary
+            from sales.models import Bill
+            Bill.objects.filter(customer_id__in=merged_ids).update(customer=primary)
+
+            # Merge points and purchases
+            primary.loyalty_points += sum(duplicates.values_list('loyalty_points', flat=True))
+            primary.total_purchases += sum(duplicates.values_list('total_purchases', flat=True))
+            latest_last_purchase = duplicates.exclude(last_purchase__isnull=True).order_by('-last_purchase').first()
+            if latest_last_purchase and (not primary.last_purchase or latest_last_purchase.last_purchase > primary.last_purchase):
+                primary.last_purchase = latest_last_purchase.last_purchase
+            primary.save()
+
+            # Move groups and deactivate duplicates
+            for dup in duplicates:
+                for group in dup.groups.all():
+                    group.customers.add(primary)
+                    group.customers.remove(dup)
+                dup.is_active = False
+                dup.notes = ((dup.notes or '') + f"\nMerged into customer #{primary.id}").strip()
+                dup.save(update_fields=['is_active', 'notes', 'updated_at'])
+
+            AuditLog.objects.create(
+                user=request.user,
+                action='update',
+                model_name='Customer',
+                object_id=str(primary.id),
+                object_repr=primary.name,
+                ip_address=get_client_ip(request),
+                details={'action': 'merge', 'duplicate_customer_ids': merged_ids}
+            )
+
+        return Response({
+            'detail': 'Customers merged successfully.',
+            'primary_customer_id': primary.id,
+            'merged_customer_ids': merged_ids
+        }, status=status.HTTP_200_OK)
 
 class CustomerGroupViewSet(viewsets.ModelViewSet):
     queryset = CustomerGroup.objects.all()

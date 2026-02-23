@@ -5,6 +5,29 @@ from .models import UserSession, AuditLog
 
 User = get_user_model()
 
+
+class RegistrationSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, min_length=8)
+
+    class Meta:
+        model = User
+        fields = ('email', 'name', 'password')
+
+    def validate_email(self, value):
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        return value
+
+    def create(self, validated_data):
+        return User.objects.create_user(
+            email=validated_data['email'],
+            name=validated_data['name'],
+            password=validated_data['password'],
+            role='admin',
+            is_staff=True,
+            is_active=True,
+        )
+
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         data = super().validate(attrs)
@@ -51,6 +74,11 @@ class ChangePasswordSerializer(serializers.Serializer):
         if len(value) < 8:
             raise serializers.ValidationError("Password must be at least 8 characters long.")
         return value
+
+
+class LogoutSerializer(serializers.Serializer):
+    refresh_token = serializers.CharField(required=True)
+
 
 class UserSessionSerializer(serializers.ModelSerializer):
     user = serializers.StringRelatedField()

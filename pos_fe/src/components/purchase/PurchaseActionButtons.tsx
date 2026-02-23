@@ -1,4 +1,4 @@
-import { Save, Upload, FileText, Download, DollarSign } from 'lucide-react';
+import { Save, Upload, FileText, Download, IndianRupee } from 'lucide-react';
 
 interface PurchaseActionButtonsProps {
   hasItems: boolean;
@@ -27,7 +27,7 @@ const PurchaseActionButtons = ({ hasItems, onSave, onMarkAsPaid }: PurchaseActio
               : 'bg-success-600 dark:bg-success-500 text-white hover:bg-success-700 dark:hover:bg-success-600'
           }`}
         >
-          <DollarSign size={18} className="mr-2" />
+          <IndianRupee size={18} className="mr-2" />
           Mark as Paid
         </button>
         

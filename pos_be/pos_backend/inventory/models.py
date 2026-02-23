@@ -116,6 +116,10 @@ class StockLevel(models.Model):
     class Meta:
         unique_together = ('product', 'store', 'batch_number')  # Unique per batch per store
         ordering = ['product__name']
+        constraints = [
+            models.CheckConstraint(check=models.Q(quantity__gte=0), name='stock_level_quantity_gte_0'),
+            models.CheckConstraint(check=models.Q(min_stock__gte=0), name='stock_level_min_stock_gte_0'),
+        ]
 
     def __str__(self):
         return f"{self.product.name} - {self.store.name} - {self.quantity}"
@@ -129,6 +133,7 @@ class StockLevel(models.Model):
 class StockTransfer(models.Model):
     STATUS_CHOICES = (
         ('pending', 'Pending'),           # Transfer created but not yet processed
+        ('approved', 'Approved'),         # Transfer approved by receiving store/admin
         ('in_transit', 'In Transit'),     # Goods are en route
         ('completed', 'Completed'),       # Transfer completed and received
         ('cancelled', 'Cancelled'),       # Cancelled/aborted transfer

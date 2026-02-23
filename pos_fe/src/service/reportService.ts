@@ -26,15 +26,27 @@ export interface DashboardData {
   }[];
 }
 
+export interface DashboardParams {
+  start_date?: string;
+  end_date?: string;
+  time_range?: 'last7days' | 'last30days' | 'last90days' | 'thisyear';
+  all_time?: boolean;
+  store?: number;
+}
+
 export interface SalesReportParams {
   start_date?: string;
   end_date?: string;
+  all_time?: boolean;
   group_by?: 'day' | 'week' | 'month';
   store?: number;
   export?: boolean;
 }
 
 export interface InventoryReportParams {
+  start_date?: string;
+  end_date?: string;
+  all_time?: boolean;
   store?: number;
   category?: number;
   low_stock?: boolean;
@@ -44,18 +56,20 @@ export interface InventoryReportParams {
 export interface CustomerReportParams {
   start_date?: string;
   end_date?: string;
+  all_time?: boolean;
   export?: boolean;
 }
 
 export interface TaxReportParams {
   start_date?: string;
   end_date?: string;
+  all_time?: boolean;
   export?: boolean;
 }
 
 // 1. Dashboard
-export const fetchDashboard = async (): Promise<DashboardData> => {
-  const res = await axiosInstance.get(`${BASE_URL}dashboard/`);
+export const fetchDashboard = async (params?: DashboardParams): Promise<DashboardData> => {
+  const res = await axiosInstance.get(`${BASE_URL}dashboard/`, { params });
   return res.data;
 };
 

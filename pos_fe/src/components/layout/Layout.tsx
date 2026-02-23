@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import ShortcutRibbon from './ShortcutRibbon';
 
 const Layout = () => {
   return (
@@ -11,6 +12,7 @@ const Layout = () => {
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100 dark:bg-gray-900 p-4">
           <Outlet />
         </main>
+        <ShortcutRibbon />
       </div>
     </div>
   );

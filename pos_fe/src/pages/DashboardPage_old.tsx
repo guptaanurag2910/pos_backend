@@ -4,7 +4,7 @@ import {
   ShoppingBag, 
   AlertTriangle, 
   Package, 
-  DollarSign,
+  IndianRupee,
 } from 'lucide-react';
 import { useDashboardStore } from '../stores/dashboardStore';
 import { 
@@ -179,7 +179,7 @@ const DashboardPage = () => {
         <DashboardCard 
           title="Today's Sales" 
           value={`₹${(dashboardData.salesSummary?.today || 0).toLocaleString('en-IN')}`} 
-          icon={<DollarSign size={24} className="text-white" />}
+          icon={<IndianRupee size={24} className="text-white" />}
           iconBgColor="bg-primary-600 dark:bg-primary-500"
           trend={{ value: "+5.2% from yesterday", isPositive: true }}
         />

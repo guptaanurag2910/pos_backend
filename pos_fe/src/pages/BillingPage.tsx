@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   CreditCard,
   PauseCircle,
@@ -44,6 +44,7 @@ const BillingPage = () => {
   const [completedBill, setCompletedBill] = useState<Bill | null>(null);
   const [heldBillsData, setHeldBillsData] = useState<Bill[]>([]);
   const [resumedBill, setResumedBill] = useState<Bill | null>(null);
+  const productSearchRef = useRef<HTMLInputElement>(null);
 
   const handleProductSelect = (product: Product) => {
     addProductToBill(product, 1);
@@ -107,6 +108,53 @@ const BillingPage = () => {
     }
   };
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+
+      if (event.key === 'F2') {
+        event.preventDefault();
+        productSearchRef.current?.focus();
+        productSearchRef.current?.select();
+        return;
+      }
+
+      if (event.key === 'F7') {
+        event.preventDefault();
+        if (currentBill.items.length > 0) setShowDiscountModal(true);
+        return;
+      }
+
+      if (event.key === 'F8') {
+        event.preventDefault();
+        if (currentBill.items.length > 0) void handleHoldBill();
+        return;
+      }
+
+      if (event.key === 'F9') {
+        event.preventDefault();
+        if (currentBill.items.length > 0) setShowPaymentModal(true);
+        return;
+      }
+
+      if (isCtrlOrMeta && key === 'n') {
+        event.preventDefault();
+        handleNewBill();
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        if (showPaymentModal) setShowPaymentModal(false);
+        else if (showDiscountModal) setShowDiscountModal(false);
+        else if (showHeldBillsModal) setShowHeldBillsModal(false);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [currentBill.items.length, showPaymentModal, showDiscountModal, showHeldBillsModal]);
+
   return (
     <div className={`h-full ${isDarkMode ? 'dark' : ''}`}>
       <div className="mb-4 flex items-center justify-between">
@@ -130,7 +178,7 @@ const BillingPage = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100%-4rem)]">
         <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden flex flex-col">
           <div className="p-4 border-b dark:border-gray-700">
-            <ProductSearch onSelectProduct={handleProductSelect} />
+            <ProductSearch onSelectProduct={handleProductSelect} inputRef={productSearchRef} />
           </div>
 
           <BillItemsList

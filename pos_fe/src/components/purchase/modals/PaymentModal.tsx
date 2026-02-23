@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, CreditCard, DollarSign, Smartphone, FileText } from 'lucide-react';
+import { X, CreditCard, IndianRupee, Smartphone, FileText } from 'lucide-react';
 
 interface PaymentData {
   id?: string;
@@ -17,7 +17,7 @@ interface PaymentData {
 interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (payment: PaymentData) => void;
+  onSave: (payment: PaymentData) => void | Promise<void | boolean>;
   invoiceData?: {
     id: string;
     supplierName: string;
@@ -83,19 +83,20 @@ const PaymentModal = ({ isOpen, onClose, onSave, invoiceData, initialData }: Pay
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!validateForm()) {
       return;
     }
 
-    onSave(formData);
+    const result = await Promise.resolve(onSave(formData));
+    if (result === false) return;
     onClose();
   };
 
   const getPaymentMethodIcon = (method: string) => {
     switch (method) {
       case 'cash':
-        return <DollarSign size={20} />;
+        return <IndianRupee size={20} />;
       case 'cheque':
         return <FileText size={20} />;
       case 'bank_transfer':

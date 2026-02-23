@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Search, RotateCcw, Package } from 'lucide-react';
 import { Bill } from '../../types';
 import { CreateReturnPayload, ReturnItemPayload } from '../../service/returnsService';
@@ -43,10 +43,50 @@ const ReturnModal = ({ isOpen, onClose, onSave }: ReturnModalProps) => {
   });
   const [message, setMessage] = useState('');
   const [showMessageModal, setShowMessageModal] = useState(false);
+  const billSearchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isOpen && step === 'select_bill') fetchBills();
   }, [isOpen, step]);
+
+  useEffect(() => {
+    if (isOpen && step === 'select_bill') {
+      const timer = setTimeout(() => {
+        billSearchInputRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, step]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (event.key === 'F2' && step === 'select_bill') {
+        event.preventDefault();
+        billSearchInputRef.current?.focus();
+        billSearchInputRef.current?.select();
+        return;
+      }
+
+      if (isCtrlOrMeta && key === 'enter' && step === 'process_return') {
+        event.preventDefault();
+        handleSave();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, step, onClose, formData]);
 
   const fetchBills = async () => {
     try {
@@ -258,6 +298,8 @@ const ReturnModal = ({ isOpen, onClose, onSave }: ReturnModalProps) => {
                     <Search size={18} className="text-gray-400 dark:text-gray-500" />
                   </div>
                   <input
+                    ref={billSearchInputRef}
+                    data-shortcut="return-bill-search"
                     type="text"
                     placeholder="Search by bill number or customer name..."
                     value={searchQuery}

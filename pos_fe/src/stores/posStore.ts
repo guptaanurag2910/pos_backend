@@ -1,7 +1,9 @@
 import { create } from 'zustand';
-import { Bill, BillItem, Customer, Product } from '../types';
-import { mockProducts, mockCustomers } from '../data/mockData';
 import { format } from 'date-fns';
+import { Bill, BillItem, Customer, Product } from '../types';
+import { listProducts } from '../service/inventoryService';
+import { customerService } from '../service/customerService';
+import { listBills } from '../service/salesService';
 
 interface POSState {
   products: Product[];
@@ -10,6 +12,7 @@ interface POSState {
     items: BillItem[];
     customerId?: number | null;
     customerName?: string;
+    notes?: string;
     subtotal: number;
     taxTotal: number;
     discount: number;
@@ -33,8 +36,84 @@ interface POSStore extends POSState {
   holdBill: (cashierId: string, cashierName: string, storeId: string, storeName: string) => void;
   clearBill: () => void;
   getBill: (id: string) => Bill | undefined;
-  resumeHeldBill: (billId: string) => void;
+  resumeHeldBill: (billOrId: any) => void;
 }
+
+const toNumber = (value: any, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const normalizeProduct = (product: any): Product => {
+  const stockDetails = Array.isArray(product?.stock_details) ? product.stock_details : [];
+  const totalStock = stockDetails.length
+    ? stockDetails.reduce((sum: number, level: any) => sum + toNumber(level?.quantity, 0), 0)
+    : toNumber(product?.current_stock, 0);
+  const minStock = stockDetails.length
+    ? Math.min(...stockDetails.map((level: any) => toNumber(level?.min_stock, 0)))
+    : 0;
+
+  return {
+    id: product.id,
+    name: product.name,
+    barcode: product.barcode,
+    category: product.category_name || product.category || 'Uncategorized',
+    price: toNumber(product.price),
+    costPrice: toNumber(product.cost_price),
+    tax: toNumber(product.tax),
+    stock: totalStock,
+    minStock,
+    unit: product.unit || 'piece',
+    image: product.image || undefined,
+  } as Product;
+};
+
+const normalizeCustomer = (customer: any): Customer => ({
+  id: customer.id,
+  name: customer.name,
+  phone: customer.phone,
+  email: customer.email || undefined,
+  loyaltyPoints: toNumber(customer.loyalty_points, 0),
+  totalPurchases: toNumber(customer.total_purchases, 0),
+  lastPurchase: customer.last_purchase || '',
+} as Customer);
+
+const normalizeApiBill = (bill: any): Bill => {
+  const items = Array.isArray(bill?.items)
+    ? bill.items.map((item: any) => ({
+        id: String(item.id),
+        productId: item.product,
+        productName: item.product_name || item.productName || '',
+        quantity: toNumber(item.quantity),
+        price: toNumber(item.price),
+        tax: toNumber(item.tax_rate ?? item.tax),
+        discount: toNumber(item.discount_amount ?? 0),
+        discountRate: toNumber(item.discount_rate ?? 0),
+        total: toNumber(item.total),
+      }))
+    : [];
+
+  return {
+    id: String(bill.id),
+    billNumber: bill.bill_number || bill.billNumber,
+    items,
+    subtotal: toNumber(bill.subtotal),
+    taxTotal: toNumber(bill.tax_total),
+    discount: toNumber(bill.discount),
+    total: toNumber(bill.total),
+    paymentMethod: bill.payment_method || bill.paymentMethod || '',
+    paymentStatus: bill.payment_status || bill.paymentStatus || 'pending',
+    customerId: bill.customer || bill.customerId || null,
+    customerName: bill.customer_name || bill.customerName || '',
+    cashierId: String(bill.cashier || ''),
+    cashierName: bill.cashier_name || bill.cashierName || '',
+    storeId: String(bill.store || ''),
+    storeName: bill.store_name || bill.storeName || '',
+    createdAt: bill.created_at || bill.createdAt || format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
+    status: bill.status || 'draft',
+    pointsRedeemed: toNumber(bill.points_redeemed ?? bill.pointsRedeemed, 0),
+  } as Bill;
+};
 
 export const usePOSStore = create<POSStore>((set, get) => ({
   products: [],
@@ -55,14 +134,26 @@ export const usePOSStore = create<POSStore>((set, get) => ({
   loadProducts: async () => {
     set({ isLoading: true });
     try {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      set({ 
-        products: mockProducts, 
-        customers: mockCustomers,
-        isLoading: false 
+      const [productsRes, customersRes, completedBillsRes] = await Promise.all([
+        listProducts({ page_size: 500 }),
+        customerService.list({ page_size: 500 }),
+        listBills({ status: 'completed', page_size: 200 }),
+      ]);
+
+      const rawProducts = Array.isArray(productsRes?.results) ? productsRes.results : productsRes || [];
+      const rawCustomers = Array.isArray(customersRes?.results) ? customersRes.results : customersRes || [];
+      const rawCompletedBills = Array.isArray(completedBillsRes?.results)
+        ? completedBillsRes.results
+        : completedBillsRes || [];
+
+      set({
+        products: rawProducts.map(normalizeProduct),
+        customers: rawCustomers.map(normalizeCustomer),
+        completedBills: rawCompletedBills.map(normalizeApiBill),
+        isLoading: false,
       });
     } catch (error) {
-      console.error('Error loading products:', error);
+      console.error('Error loading products/customers:', error);
       set({ isLoading: false });
     }
   },
@@ -72,19 +163,18 @@ export const usePOSStore = create<POSStore>((set, get) => ({
     if (!query.trim()) return [];
     const lowerQuery = query.toLowerCase();
     return products.filter(
-      product => 
-        product.name.toLowerCase().includes(lowerQuery) || 
+      (product) =>
+        product.name.toLowerCase().includes(lowerQuery) ||
         product.barcode.includes(lowerQuery) ||
-        product.category.toLowerCase().includes(lowerQuery)
+        String(product.category || '').toLowerCase().includes(lowerQuery)
     );
   },
 
   addProductToBill: (product: Product, quantity: number) => {
-    set(state => {
-      const existingItemIndex = state.currentBill.items.findIndex(
-        item => item.productId === product.id
-      );
+    set((state) => {
+      const existingItemIndex = state.currentBill.items.findIndex((item) => item.productId === product.id);
       let newItems;
+
       if (existingItemIndex !== -1) {
         newItems = [...state.currentBill.items];
         const existingItem = newItems[existingItemIndex];
@@ -92,7 +182,7 @@ export const usePOSStore = create<POSStore>((set, get) => ({
         newItems[existingItemIndex] = {
           ...existingItem,
           quantity: newQuantity,
-          total: parseFloat((product.price * newQuantity).toFixed(2))
+          total: parseFloat((product.price * newQuantity).toFixed(2)),
         };
       } else {
         const newItem: BillItem = {
@@ -103,15 +193,13 @@ export const usePOSStore = create<POSStore>((set, get) => ({
           price: product.price,
           tax: product.tax,
           discount: 0,
-          total: parseFloat((product.price * quantity).toFixed(2))
-        };
+          discountRate: 0,
+          total: parseFloat((product.price * quantity).toFixed(2)),
+        } as BillItem;
         newItems = [...state.currentBill.items, newItem];
       }
 
-      const subtotal = parseFloat(
-        newItems.reduce((sum, item) => sum + item.total, 0).toFixed(2)
-      );
-
+      const subtotal = parseFloat(newItems.reduce((sum, item) => sum + item.total, 0).toFixed(2));
       const taxTotal = parseFloat(
         newItems
           .reduce((sum, item) => {
@@ -120,10 +208,7 @@ export const usePOSStore = create<POSStore>((set, get) => ({
           }, 0)
           .toFixed(2)
       );
-
-      const total = parseFloat(
-        (subtotal + taxTotal - state.currentBill.discount).toFixed(2)
-      );
+      const total = parseFloat((subtotal + taxTotal - state.currentBill.discount).toFixed(2));
 
       return {
         ...state,
@@ -132,18 +217,16 @@ export const usePOSStore = create<POSStore>((set, get) => ({
           items: newItems,
           subtotal,
           taxTotal,
-          total
-        }
+          total,
+        },
       };
     });
   },
 
   removeItemFromBill: (itemId: string) => {
-    set(state => {
-      const newItems = state.currentBill.items.filter(item => item.id !== itemId);
-      const subtotal = parseFloat(
-        newItems.reduce((sum, item) => sum + item.total, 0).toFixed(2)
-      );
+    set((state) => {
+      const newItems = state.currentBill.items.filter((item) => item.id !== itemId);
+      const subtotal = parseFloat(newItems.reduce((sum, item) => sum + item.total, 0).toFixed(2));
       const taxTotal = parseFloat(
         newItems
           .reduce((sum, item) => {
@@ -152,9 +235,8 @@ export const usePOSStore = create<POSStore>((set, get) => ({
           }, 0)
           .toFixed(2)
       );
-      const total = parseFloat(
-        (subtotal + taxTotal - state.currentBill.discount).toFixed(2)
-      );
+      const total = parseFloat((subtotal + taxTotal - state.currentBill.discount).toFixed(2));
+
       return {
         ...state,
         currentBill: {
@@ -162,80 +244,75 @@ export const usePOSStore = create<POSStore>((set, get) => ({
           items: newItems,
           subtotal,
           taxTotal,
-          total
-        }
+          total,
+        },
       };
     });
   },
 
   updateItemQuantity: (itemId: string, quantity: number) => {
-    set(state => {
+    set((state) => {
       const newItems = [...state.currentBill.items];
-      const itemIndex = newItems.findIndex(item => item.id === itemId);
-      if (itemIndex !== -1) {
-        const item = newItems[itemIndex];
-        newItems[itemIndex] = {
-          ...item,
-          quantity,
-          total: parseFloat((item.price * quantity).toFixed(2))
-        };
-        const subtotal = parseFloat(
-          newItems.reduce((sum, item) => sum + item.total, 0).toFixed(2)
-        );
-        const taxTotal = parseFloat(
-          newItems
-            .reduce((sum, item) => {
-              const itemTaxAmount = (item.price * item.quantity * item.tax) / 100;
-              return sum + itemTaxAmount;
-            }, 0)
-            .toFixed(2)
-        );
-        const total = parseFloat(
-          (subtotal + taxTotal - state.currentBill.discount).toFixed(2)
-        );
-        return {
-          ...state,
-          currentBill: {
-            ...state.currentBill,
-            items: newItems,
-            subtotal,
-            taxTotal,
-            total
-          }
-        };
-      }
-      return state;
+      const itemIndex = newItems.findIndex((item) => item.id === itemId);
+      if (itemIndex === -1) return state;
+
+      const item = newItems[itemIndex];
+      newItems[itemIndex] = {
+        ...item,
+        quantity,
+        total: parseFloat((item.price * quantity).toFixed(2)),
+      };
+
+      const subtotal = parseFloat(newItems.reduce((sum, billItem) => sum + billItem.total, 0).toFixed(2));
+      const taxTotal = parseFloat(
+        newItems
+          .reduce((sum, billItem) => {
+            const itemTaxAmount = (billItem.price * billItem.quantity * billItem.tax) / 100;
+            return sum + itemTaxAmount;
+          }, 0)
+          .toFixed(2)
+      );
+      const total = parseFloat((subtotal + taxTotal - state.currentBill.discount).toFixed(2));
+
+      return {
+        ...state,
+        currentBill: {
+          ...state.currentBill,
+          items: newItems,
+          subtotal,
+          taxTotal,
+          total,
+        },
+      };
     });
   },
 
   applyDiscount: (amount: number, isPercentage: boolean) => {
-    set(state => {
+    set((state) => {
       let discountAmount = amount;
       if (isPercentage) {
         discountAmount = (state.currentBill.subtotal * amount) / 100;
       }
-      const total = parseFloat(
-        (state.currentBill.subtotal + state.currentBill.taxTotal - discountAmount).toFixed(2)
-      );
+      const total = parseFloat((state.currentBill.subtotal + state.currentBill.taxTotal - discountAmount).toFixed(2));
       return {
         ...state,
         currentBill: {
           ...state.currentBill,
           discount: parseFloat(discountAmount.toFixed(2)),
-          total
-        }
+          total,
+        },
       };
     });
   },
 
   setCustomer: (customer: Customer | null) => {
-    set(state => ({
+    set((state) => ({
       ...state,
       currentBill: {
         ...state.currentBill,
-        customerId: customer?.id || null,
-        customerName: customer?.name || ''
-      }
+        customerId: customer ? Number(customer.id) : null,
+        customerName: customer?.name || '',
+      },
     }));
   },
 
@@ -244,16 +321,17 @@ export const usePOSStore = create<POSStore>((set, get) => ({
     if (!query.trim()) return [];
     const lowerQuery = query.toLowerCase();
     return customers.filter(
-      customer => 
-        customer.name.toLowerCase().includes(lowerQuery) || 
+      (customer) =>
+        customer.name.toLowerCase().includes(lowerQuery) ||
         customer.phone.includes(query) ||
         (customer.email && customer.email.toLowerCase().includes(lowerQuery))
     );
   },
 
   holdBill: (cashierId: string, cashierName: string, storeId: string, storeName: string) => {
-    set(state => {
+    set((state) => {
       if (state.currentBill.items.length === 0) return state;
+
       const heldBill: Bill = {
         id: `bill_${Date.now()}`,
         billNumber: `H${Date.now().toString().slice(-6)}`,
@@ -271,8 +349,9 @@ export const usePOSStore = create<POSStore>((set, get) => ({
         storeId,
         storeName,
         createdAt: format(new Date(), 'yyyy-MM-dd HH:mm:ss'),
-        status: 'held'
-      };
+        status: 'held',
+      } as Bill;
+
       return {
         ...state,
         heldBills: [...state.heldBills, heldBill],
@@ -284,14 +363,14 @@ export const usePOSStore = create<POSStore>((set, get) => ({
           total: 0,
           pointsToRedeem: 0,
           customerId: null,
-          customerName: ''
-        }
+          customerName: '',
+        },
       };
     });
   },
 
   clearBill: () => {
-    set(state => ({
+    set((state) => ({
       ...state,
       currentBill: {
         items: [],
@@ -301,35 +380,40 @@ export const usePOSStore = create<POSStore>((set, get) => ({
         total: 0,
         pointsToRedeem: 0,
         customerId: null,
-        customerName: ''
-      }
+        customerName: '',
+      },
     }));
   },
 
   getBill: (id: string) => {
     const { heldBills, completedBills } = get();
-    return [...heldBills, ...completedBills].find(bill => bill.id === id);
+    return [...heldBills, ...completedBills].find((bill) => String(bill.id) === String(id));
   },
 
-  resumeHeldBill: (billId: string) => {
-    set(state => {
-      const heldBill = state.heldBills.find(bill => bill.id === billId);
+  resumeHeldBill: (billOrId: any) => {
+    set((state) => {
+      const heldBill =
+        typeof billOrId === 'object' && billOrId !== null
+          ? normalizeApiBill(billOrId)
+          : state.heldBills.find((bill) => String(bill.id) === String(billOrId));
+
       if (!heldBill) return state;
-      const updatedHeldBills = state.heldBills.filter(bill => bill.id !== billId);
+
+      const updatedHeldBills = state.heldBills.filter((bill) => String(bill.id) !== String(heldBill.id));
       return {
         ...state,
         heldBills: updatedHeldBills,
         currentBill: {
           items: [...heldBill.items],
-          customerId: heldBill.customerId || null,
+          customerId: (heldBill.customerId as any) || null,
           customerName: heldBill.customerName || '',
-          subtotal: heldBill.subtotal,
-          taxTotal: heldBill.taxTotal,
-          discount: heldBill.discount,
-          total: heldBill.total,
-          pointsToRedeem: 0
-        }
+          subtotal: toNumber(heldBill.subtotal),
+          taxTotal: toNumber(heldBill.taxTotal),
+          discount: toNumber(heldBill.discount),
+          total: toNumber(heldBill.total),
+          pointsToRedeem: 0,
+        },
       };
     });
-  }
+  },
 }));

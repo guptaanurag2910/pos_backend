@@ -1,0 +1,561 @@
+from rest_framework import viewsets, status, filters
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from django_filters.rest_framework import DjangoFilterBackend
+from django.db import transaction
+from django.utils import timezone
+from django.db.models import Q
+
+from .models import (
+    Supplier, PurchaseOrder, PurchaseOrderItem, 
+    GoodsReceiptNote, GoodsReceiptNoteItem, SupplierPayment, SupplierInvoice
+)
+from .serializers import (
+    SupplierSerializer, PurchaseOrderSerializer, PurchaseOrderItemSerializer,
+    GoodsReceiptNoteSerializer, GoodsReceiptNoteItemSerializer, SupplierPaymentSerializer,
+    PurchaseOrderDetailSerializer, GoodsReceiptNoteDetailSerializer, SupplierInvoiceSerializer
+)
+from accounts.permissions import IsManagerUser
+from accounts.models import AuditLog
+from accounts.utils import get_client_ip
+
+class SupplierViewSet(viewsets.ModelViewSet):
+    queryset = Supplier.objects.all()
+    serializer_class = SupplierSerializer
+    permission_classes = [IsAuthenticated, IsManagerUser]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['is_active', 'city', 'state']
+    search_fields = ['name', 'contact_person', 'phone', 'email', 'gst_number']
+    
+    @action(detail=True, methods=['get'])
+    def purchase_history(self, request, pk=None):
+        supplier = self.get_object()
+        purchase_orders = supplier.purchase_orders.all()
+        serializer = PurchaseOrderSerializer(purchase_orders, many=True, context={'request': request})
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['get'])
+    def payment_history(self, request, pk=None):
+        supplier = self.get_object()
+        payments = supplier.payments.all()
+        serializer = SupplierPaymentSerializer(payments, many=True, context={'request': request})
+        return Response(serializer.data)
+    
+    def perform_create(self, serializer):
+        with transaction.atomic():
+            supplier = serializer.save(created_by=self.request.user)
+            
+            # Log the action
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='create',
+                model_name='Supplier',
+                object_id=str(supplier.id),
+                object_repr=supplier.name,
+                ip_address=get_client_ip(self.request)
+            )
+
+class PurchaseOrderViewSet(viewsets.ModelViewSet):
+    queryset = PurchaseOrder.objects.all()
+    permission_classes = [IsAuthenticated, IsManagerUser]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['supplier', 'store', 'status', 'payment_status', 'order_date']
+    search_fields = ['po_number', 'supplier__name', 'notes']
+    ordering_fields = ['created_at', 'order_date', 'expected_delivery_date', 'total']
+    ordering = ['-created_at']
+    
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return PurchaseOrderDetailSerializer
+        return PurchaseOrderSerializer
+    
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'admin':
+            return PurchaseOrder.objects.all()
+        return PurchaseOrder.objects.filter(store=user.store)
+    
+    @action(detail=True, methods=['post'])
+    def update_status(self, request, pk=None):
+        purchase_order = self.get_object()
+        new_status = request.data.get('status')
+        
+        valid_statuses = dict(PurchaseOrder.STATUS_CHOICES).keys()
+        if not new_status or new_status not in valid_statuses:
+            return Response(
+                {"detail": f"Invalid status. Must be one of: {', '.join(valid_statuses)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        with transaction.atomic():
+            purchase_order.status = new_status
+            purchase_order.save()
+            
+            # Log the action
+            AuditLog.objects.create(
+                user=request.user,
+                action='update',
+                model_name='PurchaseOrder',
+                object_id=str(purchase_order.id),
+                object_repr=purchase_order.po_number,
+                ip_address=get_client_ip(request),
+                details={
+                    'action': 'update_status',
+                    'new_status': new_status
+                }
+            )
+        
+        serializer = self.get_serializer(purchase_order)
+        return Response(serializer.data)
+
+    def perform_create(self, serializer):
+        with transaction.atomic():
+            # Generate PO number
+            store = self.request.user.store
+            today = timezone.now().strftime('%Y%m%d')
+
+            last_po = PurchaseOrder.objects.filter(
+                store=store,
+                po_number__startswith=f"PO-{store.code}-{today}"
+            ).order_by('-po_number').first()
+
+            if last_po:
+                try:
+                    last_num = int(last_po.po_number.split('-')[-1])
+                    po_number = f"PO-{store.code}-{today}-{last_num + 1:03d}"
+                except ValueError:
+                    po_number = f"PO-{store.code}-{today}-001"
+            else:
+                po_number = f"PO-{store.code}-{today}-001"
+
+            items_data = serializer.validated_data.pop('items', [])  # Extract items here
+            po = serializer.save(po_number=po_number, store=store, created_by=self.request.user)
+
+            # Create each PurchaseOrderItem
+            for item_data in items_data:
+                PurchaseOrderItem.objects.create(purchase_order=po, **item_data)
+
+            po.calculate_totals()
+
+            # Audit log
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='create',
+                model_name='PurchaseOrder',
+                object_id=str(po.id),
+                object_repr=po.po_number,
+                ip_address=get_client_ip(self.request)
+            )
+
+class PurchaseOrderItemViewSet(viewsets.ModelViewSet):
+    serializer_class = PurchaseOrderItemSerializer
+    permission_classes = [IsAuthenticated, IsManagerUser]
+    
+    def get_queryset(self):
+        po_id = self.kwargs.get('po_pk')
+        if po_id:
+            return PurchaseOrderItem.objects.filter(purchase_order_id=po_id)
+        return PurchaseOrderItem.objects.none()
+    
+    def perform_create(self, serializer):
+        po_id = self.kwargs.get('po_pk')
+        purchase_order = PurchaseOrder.objects.get(id=po_id)
+        
+        if purchase_order.status not in ['draft', 'sent']:
+            return Response(
+                {"detail": f"Cannot add items to a {purchase_order.status} purchase order"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        with transaction.atomic():
+            item = serializer.save(purchase_order_id=po_id)
+            
+            # Update PO totals
+            purchase_order.calculate_totals()
+            
+            # Log the action
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='create',
+                model_name='PurchaseOrderItem',
+                object_id=str(item.id),
+                object_repr=str(item),
+                ip_address=get_client_ip(self.request),
+                details={'purchase_order': purchase_order.po_number}
+            )
+    
+    def perform_update(self, serializer):
+        with transaction.atomic():
+            item = serializer.save()
+            
+            # Update PO totals
+            purchase_order = item.purchase_order
+            purchase_order.calculate_totals()
+            
+            # Log the action
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='update',
+                model_name='PurchaseOrderItem',
+                object_id=str(item.id),
+                object_repr=str(item),
+                ip_address=get_client_ip(self.request),
+                details={'purchase_order': purchase_order.po_number}
+            )
+    
+    def perform_destroy(self, instance):
+        purchase_order = instance.purchase_order
+        
+        if purchase_order.status not in ['draft', 'sent']:
+            return Response(
+                {"detail": f"Cannot remove items from a {purchase_order.status} purchase order"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        with transaction.atomic():
+            # Log the action before deletion
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='delete',
+                model_name='PurchaseOrderItem',
+                object_id=str(instance.id),
+                object_repr=str(instance),
+                ip_address=get_client_ip(self.request),
+                details={'purchase_order': purchase_order.po_number}
+            )
+            
+            instance.delete()
+            
+            # Update PO totals
+            purchase_order.calculate_totals()
+
+class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
+    queryset = GoodsReceiptNote.objects.all()
+    permission_classes = [IsAuthenticated, IsManagerUser]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['supplier', 'store', 'status', 'receipt_date', 'purchase_order']
+    search_fields = ['grn_number', 'invoice_number', 'supplier__name', 'notes']
+    ordering_fields = ['created_at', 'receipt_date', 'total']
+    ordering = ['-created_at']
+    
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return GoodsReceiptNoteDetailSerializer
+        return GoodsReceiptNoteSerializer
+    
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'admin':
+            return GoodsReceiptNote.objects.all()
+        return GoodsReceiptNote.objects.filter(store=user.store)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            self.perform_update(serializer)
+
+            items_data = request.data.get('items', [])
+            po_items_data = request.data.get('po_items', [])
+
+            # Clear existing GRN items
+            if items_data:
+                instance.items.all().delete()
+
+                for item in items_data:
+                    product_id = item.get('product_id') or item.get('product')
+                    if not product_id:
+                        continue  # skip invalid items
+
+                    GoodsReceiptNoteItem.objects.create(
+                        grn=instance,
+                        product_id=product_id,
+                        quantity=item.get('received_quantity', 0),
+                        unit_price=item.get('unit_price', 0),
+                        discount_percentage=item.get('discount_percentage', 0),
+                        discount_amount=item.get('discount_amount', 0),
+                        tax_rate=item.get('tax_rate', 0),
+                        tax_amount=item.get('tax_amount', 0),
+                        total=item.get('total', 0),
+                        batch_number=item.get('batch_no'),
+                        expiry_date=item.get('expiry_date') or None
+                    )
+
+            # Update corresponding PO items
+            for po_item in po_items_data:
+                product_id = po_item.get('product')
+                if not product_id:
+                    continue
+
+                try:
+                    po_item_obj = PurchaseOrderItem.objects.get(
+                        purchase_order=instance.purchase_order,
+                        product_id=product_id
+                    )
+
+                    # Match GRN item using product_id or product
+                    matched_grn_item = next(
+                        (i for i in items_data if (i.get('product_id') or i.get('product')) == product_id),
+                        None
+                    )
+                    if matched_grn_item:
+                        po_item_obj.quantity_received += matched_grn_item.get('received_quantity', 0)
+                        po_item_obj.discount_percentage = matched_grn_item.get('discount_percentage', 0)
+                        po_item_obj.discount_amount = matched_grn_item.get('discount_amount', 0)
+                        po_item_obj.tax_rate = matched_grn_item.get('tax_rate', 0)
+                        po_item_obj.tax_amount = matched_grn_item.get('tax_amount', 0)
+                        po_item_obj.total = matched_grn_item.get('total', 0)
+                        po_item_obj.save()
+
+                except PurchaseOrderItem.DoesNotExist:
+                    pass  # gracefully ignore missing PO item
+
+            # Recalculate totals
+            instance.calculate_totals()
+            if instance.purchase_order:
+                instance.purchase_order.calculate_totals()
+
+        return Response(self.get_serializer(instance).data)
+
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        grn = self.get_object()
+        
+        if grn.status == 'completed':
+            return Response(
+                {"detail": "GRN is already completed"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        with transaction.atomic():
+            # Update GRN status
+            grn.status = 'completed'
+            grn.save()
+            
+            # Update purchase order status if applicable
+            if grn.purchase_order:
+                po = grn.purchase_order
+                
+                # Check if all items have been received
+                all_received = True
+                for po_item in po.items.all():
+                    received_qty = GoodsReceiptNoteItem.objects.filter(
+                        grn__purchase_order=po,
+                        product=po_item.product
+                    ).aggregate(total=models.Sum('quantity'))['total'] or 0
+                    
+                    po_item.quantity_received = received_qty
+                    po_item.save()
+                    
+                    if received_qty < po_item.quantity_ordered:
+                        all_received = False
+                
+                po.status = 'received' if all_received else 'partially_received'
+                po.save()
+            
+            # Update inventory
+            from inventory.models import StockRecord, StockLevel
+            
+            for item in grn.items.all():
+                # Create stock record
+                StockRecord.objects.create(
+                    product=item.product,
+                    store=grn.store,
+                    quantity=item.quantity,
+                    record_type='purchase',
+                    reference_id=grn.grn_number,
+                    batch_number=item.batch_number,
+                    expiry_date=item.expiry_date,
+                    created_by=request.user
+                )
+                
+                # Update stock level
+                stock_level, created = StockLevel.objects.get_or_create(
+                    product=item.product,
+                    store=grn.store,
+                    batch_number=item.batch_number,
+                    defaults={
+                        'quantity': 0,
+                        'expiry_date': item.expiry_date
+                    }
+                )
+                
+                stock_level.quantity += item.quantity
+                if not stock_level.expiry_date and item.expiry_date:
+                    stock_level.expiry_date = item.expiry_date
+                stock_level.save()
+                
+                # Update product cost price if needed
+                product = item.product
+                if product.cost_price != item.unit_price:
+                    product.cost_price = item.unit_price
+                    product.save()
+            
+            # Log the action
+            AuditLog.objects.create(
+                user=request.user,
+                action='update',
+                model_name='GoodsReceiptNote',
+                object_id=str(grn.id),
+                object_repr=grn.grn_number,
+                ip_address=get_client_ip(request),
+                details={'action': 'complete'}
+            )
+        
+        serializer = self.get_serializer(grn)
+        return Response(serializer.data)
+
+    def perform_create(self, serializer):
+        with transaction.atomic():
+            store = self.request.user.store
+            today = timezone.now().strftime('%Y%m%d')
+
+            last_grn = GoodsReceiptNote.objects.filter(
+                store=store,
+                grn_number__startswith=f"GRN-{store.code}-{today}"
+            ).order_by('-grn_number').first()
+
+            if last_grn:
+                try:
+                    last_num = int(last_grn.grn_number.split('-')[-1])
+                    grn_number = f"GRN-{store.code}-{today}-{last_num + 1:03d}"
+                except ValueError:
+                    grn_number = f"GRN-{store.code}-{today}-001"
+            else:
+                grn_number = f"GRN-{store.code}-{today}-001"
+
+            # Extract items and po_items data from request
+            items_data = self.request.data.get('items', [])
+            po_items_data = self.request.data.get('po_items', [])
+            grn = serializer.save(grn_number=grn_number, store=store, created_by=self.request.user)
+
+            # Create GRN Items
+            for item in items_data:
+                GoodsReceiptNoteItem.objects.create(
+                    grn=grn,
+                    product_id=item['product_id'],
+                    quantity=item['received_quantity'],
+                    unit_price=item['unit_price'],
+                    discount_percentage=item['discount_percentage'],
+                    discount_amount=item['discount_amount'],
+                    tax_rate=item['tax_rate'],
+                    tax_amount=item['tax_amount'],
+                    total=item['total'],
+                    batch_number=item.get('batch_no'),
+                    expiry_date=item.get('expiry_date') or None
+                )
+
+            # Update matching PO items
+            for po_item in po_items_data:
+                product_id = po_item['product']
+                try:
+                    po_item_obj = PurchaseOrderItem.objects.get(purchase_order=grn.purchase_order,
+                                                                product_id=product_id)
+                    # find corresponding received item
+                    matched_grn_item = next((i for i in items_data if i['product_id'] == product_id), None)
+                    if matched_grn_item:
+                        po_item_obj.quantity_received += matched_grn_item['received_quantity']
+                        po_item_obj.discount_percentage = matched_grn_item['discount_percentage']
+                        po_item_obj.discount_amount = matched_grn_item['discount_amount']
+                        po_item_obj.tax_rate = matched_grn_item['tax_rate']
+                        po_item_obj.tax_amount = matched_grn_item['tax_amount']
+                        po_item_obj.total = matched_grn_item['total']
+                        po_item_obj.save()
+                except PurchaseOrderItem.DoesNotExist:
+                    pass  # ignore if not found
+
+            grn.calculate_totals()
+            if grn.purchase_order:
+                grn.purchase_order.calculate_totals()
+
+            # Audit log
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='create',
+                model_name='GoodsReceiptNote',
+                object_id=str(grn.id),
+                object_repr=grn.grn_number,
+                ip_address=get_client_ip(self.request)
+            )
+
+
+class GoodsReceiptNoteItemViewSet(viewsets.ModelViewSet):
+    serializer_class = GoodsReceiptNoteItemSerializer
+    permission_classes = [IsAuthenticated, IsManagerUser]
+    
+    def get_queryset(self):
+        grn_id = self.kwargs.get('grn_pk')
+        if grn_id:
+            return GoodsReceiptNoteItem.objects.filter(grn_id=grn_id)
+        return GoodsReceiptNoteItem.objects.none()
+    
+    def perform_create(self, serializer):
+        grn_id = self.kwargs.get('grn_pk')
+        grn = GoodsReceiptNote.objects.get(id=grn_id)
+        
+        if grn.status == 'completed':
+            return Response(
+                {"detail": "Cannot add items to a completed GRN"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        with transaction.atomic():
+            item = serializer.save(grn_id=grn_id)
+            
+            # Update GRN totals
+            grn.calculate_totals()
+            
+            # Log the action
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='create',
+                model_name='GoodsReceiptNoteItem',
+                object_id=str(item.id),
+                object_repr=str(item),
+                ip_address=get_client_ip(self.request),
+                details={'grn': grn.grn_number}
+            )
+
+
+class SupplierInvoiceViewSet(viewsets.ModelViewSet):
+    queryset = SupplierInvoice.objects.all().order_by('-created_at')
+    serializer_class = SupplierInvoiceSerializer
+
+class SupplierPaymentViewSet(viewsets.ModelViewSet):
+    queryset = SupplierPayment.objects.all()
+    serializer_class = SupplierPaymentSerializer
+    permission_classes = [IsAuthenticated, IsManagerUser]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['supplier', 'purchase_order', 'payment_method', 'status', 'payment_date']
+    search_fields = ['reference_number', 'notes', 'supplier__name']
+    ordering_fields = ['payment_date', 'amount', 'created_at']
+    ordering = ['-payment_date']
+    
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'admin':
+            return SupplierPayment.objects.all()
+        
+        # For managers, show payments for purchases from their store
+        return SupplierPayment.objects.filter(
+            Q(purchase_order__store=user.store) | 
+            Q(purchase_order__isnull=True, created_by=user)
+        )
+    
+    def perform_create(self, serializer):
+        with transaction.atomic():
+            payment = serializer.save(created_by=self.request.user)
+            
+            # Log the action
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='create',
+                model_name='SupplierPayment',
+                object_id=str(payment.id),
+                object_repr=str(payment),
+                ip_address=get_client_ip(self.request)
+            )

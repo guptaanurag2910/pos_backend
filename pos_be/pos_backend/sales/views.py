@@ -2,10 +2,12 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import ValidationError
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
+from decimal import Decimal, InvalidOperation
 
 from .models import Bill, BillItem, Payment
 from .serializers import (
@@ -37,6 +39,31 @@ class BillViewSet(viewsets.ModelViewSet):
         if user.role == 'admin':
             return Bill.objects.all()
         return Bill.objects.filter(store=user.store)
+
+    def _generate_invoice_number(self, bill):
+        try:
+            from stores.models import StoreSettings
+            settings = StoreSettings.objects.get(store=bill.store)
+            prefix = settings.invoice_prefix or 'INV'
+            start_number = settings.invoice_start_number or 1
+        except Exception:
+            prefix = 'INV'
+            start_number = 1
+
+        base = f"{prefix}-{bill.store.code}-"
+        max_seq = 0
+        for inv in Bill.objects.filter(store=bill.store).exclude(invoice_number__isnull=True).values_list('invoice_number', flat=True):
+            if not inv or not inv.startswith(base):
+                continue
+            try:
+                seq = int(inv.split('-')[-1])
+                if seq > max_seq:
+                    max_seq = seq
+            except (ValueError, IndexError):
+                continue
+
+        next_seq = max(start_number, max_seq + 1)
+        return f"{base}{next_seq:06d}"
     
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
@@ -58,13 +85,20 @@ class BillViewSet(viewsets.ModelViewSet):
         
         with transaction.atomic():
             # Complete the bill
-            success = bill.complete(payment_method)
+            try:
+                success = bill.complete(payment_method)
+            except ValueError as e:
+                return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
             
             if not success:
                 return Response(
                     {"detail": "Failed to complete bill"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+
+            if not bill.invoice_number:
+                bill.invoice_number = self._generate_invoice_number(bill)
+                bill.save(update_fields=['invoice_number', 'updated_at'])
             
             # Create payment record if payment method provided
             if payment_method:
@@ -92,6 +126,84 @@ class BillViewSet(viewsets.ModelViewSet):
         
         serializer = BillDetailSerializer(bill, context={'request': request})
         return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def validate_payment_split(self, request, pk=None):
+        bill = self.get_object()
+        payments = request.data.get('payments', [])
+
+        if not isinstance(payments, list) or not payments:
+            return Response(
+                {"detail": "payments must be a non-empty list"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        valid_methods = {key for key, _ in Payment.PAYMENT_METHOD_CHOICES}
+        total_input = Decimal('0.00')
+        errors = []
+
+        for idx, payment in enumerate(payments, start=1):
+            method = payment.get('payment_method')
+            amount_raw = payment.get('amount')
+            if method not in valid_methods:
+                errors.append({'index': idx, 'error': 'invalid payment_method'})
+                continue
+            try:
+                amount = Decimal(str(amount_raw))
+                if amount <= 0:
+                    raise ValueError
+            except (InvalidOperation, ValueError):
+                errors.append({'index': idx, 'error': 'amount must be > 0'})
+                continue
+            total_input += amount
+
+        if errors:
+            return Response({'valid': False, 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        bill_total = Decimal(str(bill.total))
+        difference = (total_input - bill_total).quantize(Decimal('0.01'))
+        is_valid = abs(difference) <= Decimal('0.01')
+
+        return Response({
+            'valid': is_valid,
+            'bill_total': str(bill_total),
+            'input_total': str(total_input),
+            'difference': str(difference),
+            'suggestion': 'Split is valid' if is_valid else 'Adjust split amounts to match bill total'
+        })
+
+    @action(detail=True, methods=['get', 'post'])
+    def receipt(self, request, pk=None):
+        bill = self.get_object()
+        if bill.status != 'completed':
+            return Response({"detail": "Receipt is available only for completed bills"}, status=status.HTTP_400_BAD_REQUEST)
+
+        reprint_count = AuditLog.objects.filter(
+            model_name='Bill',
+            object_id=str(bill.id),
+            details__action='receipt_reprint'
+        ).count()
+
+        if request.method == 'POST':
+            AuditLog.objects.create(
+                user=request.user,
+                action='view',
+                model_name='Bill',
+                object_id=str(bill.id),
+                object_repr=bill.bill_number,
+                ip_address=get_client_ip(request),
+                details={'action': 'receipt_reprint'}
+            )
+            reprint_count += 1
+
+        data = BillDetailSerializer(bill, context={'request': request}).data
+        return Response({
+            'bill': data,
+            'meta': {
+                'print_type': 'reprint' if request.method == 'POST' else 'original_view',
+                'reprint_count': reprint_count
+            }
+        })
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -266,10 +378,7 @@ class BillItemViewSet(viewsets.ModelViewSet):
         
         # Check if bill can be modified
         if bill.status not in ['draft', 'on_hold']:
-            return Response(
-                {"detail": f"Cannot add items to a {bill.status} bill"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            raise ValidationError({"detail": f"Cannot add items to a {bill.status} bill"})
         
         with transaction.atomic():
             item = serializer.save(bill_id=bill_id)
@@ -312,10 +421,7 @@ class BillItemViewSet(viewsets.ModelViewSet):
         
         # Check if bill can be modified
         if bill.status not in ['draft', 'on_hold']:
-            return Response(
-                {"detail": f"Cannot remove items from a {bill.status} bill"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            raise ValidationError({"detail": f"Cannot remove items from a {bill.status} bill"})
         
         with transaction.atomic():
             # Log the action before deletion
@@ -356,6 +462,9 @@ class PaymentViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         with transaction.atomic():
+            amount = Decimal(str(serializer.validated_data.get('amount', 0)))
+            if amount <= 0:
+                raise ValidationError({"detail": "Payment amount must be greater than zero"})
             payment = serializer.save(created_by=self.request.user, status='completed')
             
             # Log the action

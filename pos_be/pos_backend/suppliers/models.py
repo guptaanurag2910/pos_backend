@@ -35,6 +35,10 @@ class Supplier(models.Model):
 
     class Meta:
         ordering = ['name']
+        constraints = [
+            models.CheckConstraint(check=models.Q(credit_period__gte=0), name='supplier_credit_period_gte_0'),
+            models.CheckConstraint(check=models.Q(credit_limit__gte=0), name='supplier_credit_limit_gte_0'),
+        ]
 
     def __str__(self):
         return self.name
@@ -79,6 +83,12 @@ class PurchaseOrder(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        constraints = [
+            models.CheckConstraint(check=models.Q(shipping_charges__gte=0), name='po_shipping_charges_gte_0'),
+            models.CheckConstraint(check=models.Q(subtotal__gte=0), name='po_subtotal_gte_0'),
+            models.CheckConstraint(check=models.Q(tax_total__gte=0), name='po_tax_total_gte_0'),
+            models.CheckConstraint(check=models.Q(total__gte=0), name='po_total_gte_0'),
+        ]
 
     def __str__(self):
         return self.po_number
@@ -127,6 +137,13 @@ class PurchaseOrderItem(models.Model):
 
     class Meta:
         ordering = ['product__name']
+        constraints = [
+            models.CheckConstraint(check=models.Q(quantity_ordered__gte=0), name='po_item_qty_ordered_gte_0'),
+            models.CheckConstraint(check=models.Q(quantity_received__gte=0), name='po_item_qty_received_gte_0'),
+            models.CheckConstraint(check=models.Q(unit_price__gte=0), name='po_item_unit_price_gte_0'),
+            models.CheckConstraint(check=models.Q(tax_rate__gte=0), name='po_item_tax_rate_gte_0'),
+            models.CheckConstraint(check=models.Q(total__gte=0), name='po_item_total_gte_0'),
+        ]
 
     def __str__(self):
         return f"{self.product.name} - {self.quantity_ordered} units"
@@ -178,6 +195,13 @@ class GoodsReceiptNote(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        constraints = [
+            models.CheckConstraint(check=models.Q(subtotal__gte=0), name='grn_subtotal_gte_0'),
+            models.CheckConstraint(check=models.Q(discount_total__gte=0), name='grn_discount_total_gte_0'),
+            models.CheckConstraint(check=models.Q(tax_total__gte=0), name='grn_tax_total_gte_0'),
+            models.CheckConstraint(check=models.Q(shipping_charges__gte=0), name='grn_shipping_charges_gte_0'),
+            models.CheckConstraint(check=models.Q(total__gte=0), name='grn_total_gte_0'),
+        ]
 
     def __str__(self):
         return self.grn_number
@@ -225,6 +249,12 @@ class GoodsReceiptNoteItem(models.Model):
 
     class Meta:
         ordering = ['product__name']
+        constraints = [
+            models.CheckConstraint(check=models.Q(quantity__gte=0), name='grn_item_qty_gte_0'),
+            models.CheckConstraint(check=models.Q(unit_price__gte=0), name='grn_item_unit_price_gte_0'),
+            models.CheckConstraint(check=models.Q(tax_rate__gte=0), name='grn_item_tax_rate_gte_0'),
+            models.CheckConstraint(check=models.Q(total__gte=0), name='grn_item_total_gte_0'),
+        ]
 
     def __str__(self):
         return f"{self.product.name} - {self.quantity} units"
@@ -251,15 +281,23 @@ class SupplierInvoice(models.Model):
         ('draft', 'Draft'),
         ('verified', 'Verified'),
         ('approved', 'Approved'),
+        ('partially_paid', 'Partially Paid'),
         ('paid', 'Paid'),
     )
 
     invoice_number = models.CharField(max_length=50, unique=True)
     supplier_invoice_number = models.CharField(max_length=100)
-    supplier_name = models.CharField(max_length=255)
+    supplier_name = models.CharField(max_length=255, blank=True, null=True)
+    supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True, blank=True, related_name='invoices')
 
-    po_number = models.CharField(max_length=100)
+    po_number = models.CharField(max_length=100, blank=True, null=True)
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.SET_NULL, null=True, blank=True,
+                                       related_name='supplier_invoices')
     grn_number = models.CharField(max_length=100, blank=True, null=True)
+    grn = models.ForeignKey(GoodsReceiptNote, on_delete=models.SET_NULL, null=True, blank=True,
+                            related_name='supplier_invoices')
+    store = models.ForeignKey('stores.Store', on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name='supplier_invoices')
 
     invoice_date = models.DateField(default=timezone.now)
     due_date = models.DateField()
@@ -272,19 +310,38 @@ class SupplierInvoice(models.Model):
     tax_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     shipping_charges = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     grand_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     notes = models.TextField(blank=True, null=True)
-
+    created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name='created_supplier_invoices')
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        constraints = [
+            models.CheckConstraint(check=models.Q(subtotal__gte=0), name='supplier_invoice_subtotal_gte_0'),
+            models.CheckConstraint(check=models.Q(discount_total__gte=0), name='supplier_invoice_discount_total_gte_0'),
+            models.CheckConstraint(check=models.Q(tax_total__gte=0), name='supplier_invoice_tax_total_gte_0'),
+            models.CheckConstraint(check=models.Q(shipping_charges__gte=0), name='supplier_invoice_shipping_gte_0'),
+            models.CheckConstraint(check=models.Q(grand_total__gte=0), name='supplier_invoice_grand_total_gte_0'),
+            models.CheckConstraint(check=models.Q(amount_paid__gte=0), name='supplier_invoice_amount_paid_gte_0'),
+        ]
 
     def __str__(self):
         return f"Supplier Invoice - {self.invoice_number}"
 
+    @property
+    def due_amount(self):
+        return max(self.grand_total - self.amount_paid, Decimal('0'))
+
 
 class SupplierInvoiceItem(models.Model):
     invoice = models.ForeignKey(SupplierInvoice, on_delete=models.CASCADE, related_name='items')
-
-    product_id = models.CharField(max_length=100)
+    product_ref = models.ForeignKey('inventory.Product', on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='supplier_invoice_items')
+    product_code = models.CharField(max_length=100, blank=True, null=True)
     product_name = models.CharField(max_length=255)
 
     quantity = models.DecimalField(max_digits=10, decimal_places=2)
@@ -295,7 +352,16 @@ class SupplierInvoiceItem(models.Model):
                                      default='percentage')
 
     tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(check=models.Q(quantity__gte=0), name='supplier_invoice_item_qty_gte_0'),
+            models.CheckConstraint(check=models.Q(unit_price__gte=0), name='supplier_invoice_item_unit_price_gte_0'),
+            models.CheckConstraint(check=models.Q(tax_rate__gte=0), name='supplier_invoice_item_tax_rate_gte_0'),
+            models.CheckConstraint(check=models.Q(total__gte=0), name='supplier_invoice_item_total_gte_0'),
+        ]
 
     def __str__(self):
         return self.product_name
@@ -319,6 +385,8 @@ class SupplierPayment(models.Model):
 
     supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE, related_name='payments')
     purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.SET_NULL, null=True, blank=True, related_name='payments')
+    supplier_invoice = models.ForeignKey(SupplierInvoice, on_delete=models.SET_NULL, null=True, blank=True,
+                                         related_name='payments')
 
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
@@ -335,6 +403,9 @@ class SupplierPayment(models.Model):
 
     class Meta:
         ordering = ['-payment_date']
+        constraints = [
+            models.CheckConstraint(check=models.Q(amount__gt=0), name='supplier_payment_amount_gt_0'),
+        ]
 
     def __str__(self):
         return f"Payment to {self.supplier.name} - {self.amount}"
@@ -361,3 +432,17 @@ class SupplierPayment(models.Model):
                 elif total_paid > 0:
                     po.payment_status = 'partially_paid'
                 po.save()
+
+            if self.supplier_invoice:
+                invoice = self.supplier_invoice
+                total_paid_for_invoice = SupplierPayment.objects.filter(
+                    supplier_invoice=invoice,
+                    status='completed'
+                ).aggregate(total=Sum('amount'))['total'] or 0
+
+                invoice.amount_paid = total_paid_for_invoice
+                if total_paid_for_invoice >= invoice.grand_total:
+                    invoice.status = 'paid'
+                elif total_paid_for_invoice > 0:
+                    invoice.status = 'partially_paid'
+                invoice.save(update_fields=['amount_paid', 'status', 'updated_at'])

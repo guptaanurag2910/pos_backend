@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="1450" viewBox="0 0 2200 1450">
+<defs>
+<marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#5f6b7a"/></marker>
+</defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="70" y="40" font-family="Arial" font-size="28" font-weight="700" fill="#1f2937">POS ERD (Application Tables Only)</text>
+<text x="70" y="64" font-family="Arial" font-size="14" fill="#4b5563">Django internal tables removed</text>
+<line x1="250.0" y1="104.0" x2="300.0" y2="104.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="390.0" y1="128.0" x2="390.0" y2="170.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="390.0" y1="128.0" x2="390.0" y2="260.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="160.0" y1="128.0" x2="160.0" y2="170.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="480.0" y1="104.0" x2="70.0" y2="194.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="650.0" y1="128.0" x2="650.0" y2="80.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="650.0" y1="128.0" x2="650.0" y2="170.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="650.0" y1="218.0" x2="650.0" y2="260.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="250.0" y1="104.0" x2="560.0" y2="284.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="650.0" y1="218.0" x2="650.0" y2="350.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="250.0" y1="104.0" x2="560.0" y2="374.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="480.0" y1="104.0" x2="560.0" y2="374.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="250.0" y1="104.0" x2="560.0" y2="464.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="480.0" y1="104.0" x2="560.0" y2="464.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="650.0" y1="488.0" x2="650.0" y2="530.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="650.0" y1="218.0" x2="650.0" y2="530.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="480.0" y1="104.0" x2="850.0" y2="104.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="480.0" y1="104.0" x2="850.0" y2="194.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="940.0" y1="128.0" x2="940.0" y2="170.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="940.0" y1="128.0" x2="940.0" y2="260.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="250.0" y1="104.0" x2="850.0" y2="284.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="480.0" y1="104.0" x2="850.0" y2="284.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="940.0" y1="308.0" x2="940.0" y2="350.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="740.0" y1="194.0" x2="850.0" y2="374.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="940.0" y1="308.0" x2="940.0" y2="440.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="480.0" y1="104.0" x2="850.0" y2="464.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="940.0" y1="308.0" x2="940.0" y2="530.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="480.0" y1="104.0" x2="850.0" y2="554.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="940.0" y1="578.0" x2="940.0" y2="620.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="940.0" y1="398.0" x2="940.0" y2="620.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="740.0" y1="194.0" x2="850.0" y2="644.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="480.0" y1="104.0" x2="1140.0" y2="104.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="1230.0" y1="128.0" x2="1230.0" y2="170.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="250.0" y1="104.0" x2="1140.0" y2="194.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="480.0" y1="104.0" x2="1140.0" y2="194.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="1230.0" y1="218.0" x2="1230.0" y2="260.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="740.0" y1="194.0" x2="1140.0" y2="284.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="1230.0" y1="218.0" x2="1230.0" y2="350.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="1230.0" y1="128.0" x2="1230.0" y2="350.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="250.0" y1="104.0" x2="1140.0" y2="374.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="480.0" y1="104.0" x2="1140.0" y2="374.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="1230.0" y1="398.0" x2="1230.0" y2="440.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="740.0" y1="194.0" x2="1140.0" y2="464.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="1230.0" y1="578.0" x2="1230.0" y2="620.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="1230.0" y1="128.0" x2="1230.0" y2="710.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="1230.0" y1="218.0" x2="1230.0" y2="710.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<line x1="480.0" y1="104.0" x2="1140.0" y2="734.0" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
+<rect x="70" y="80" rx="8" ry="8" width="180" height="48" fill="#E8F0FE" stroke="#3b4756" stroke-width="1.2"/>
+<text x="160.0" y="110" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">Store</text>
+<rect x="70" y="170" rx="8" ry="8" width="180" height="48" fill="#E8F0FE" stroke="#3b4756" stroke-width="1.2"/>
+<text x="160.0" y="200" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">StoreSettings</text>
+<rect x="300" y="80" rx="8" ry="8" width="180" height="48" fill="#EAF7EE" stroke="#3b4756" stroke-width="1.2"/>
+<text x="390.0" y="110" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">User</text>
+<rect x="300" y="170" rx="8" ry="8" width="180" height="48" fill="#EAF7EE" stroke="#3b4756" stroke-width="1.2"/>
+<text x="390.0" y="200" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">UserSession</text>
+<rect x="300" y="260" rx="8" ry="8" width="180" height="48" fill="#EAF7EE" stroke="#3b4756" stroke-width="1.2"/>
+<text x="390.0" y="290" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">AuditLog</text>
+<rect x="560" y="80" rx="8" ry="8" width="180" height="48" fill="#FFF3E6" stroke="#3b4756" stroke-width="1.2"/>
+<text x="650.0" y="110" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">Category</text>
+<rect x="560" y="170" rx="8" ry="8" width="180" height="48" fill="#FFF3E6" stroke="#3b4756" stroke-width="1.2"/>
+<text x="650.0" y="200" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">Product</text>
+<rect x="560" y="260" rx="8" ry="8" width="180" height="48" fill="#FFF3E6" stroke="#3b4756" stroke-width="1.2"/>
+<text x="650.0" y="290" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">StockLevel</text>
+<rect x="560" y="350" rx="8" ry="8" width="180" height="48" fill="#FFF3E6" stroke="#3b4756" stroke-width="1.2"/>
+<text x="650.0" y="380" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">StockRecord</text>
+<rect x="560" y="440" rx="8" ry="8" width="180" height="48" fill="#FFF3E6" stroke="#3b4756" stroke-width="1.2"/>
+<text x="650.0" y="470" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">StockTransfer</text>
+<rect x="560" y="530" rx="8" ry="8" width="180" height="48" fill="#FFF3E6" stroke="#3b4756" stroke-width="1.2"/>
+<text x="650.0" y="560" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">StockTransferItem</text>
+<rect x="560" y="620" rx="8" ry="8" width="180" height="48" fill="#FFF3E6" stroke="#3b4756" stroke-width="1.2"/>
+<text x="650.0" y="650" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">InventoryUpload</text>
+<rect x="850" y="80" rx="8" ry="8" width="180" height="48" fill="#F3ECFF" stroke="#3b4756" stroke-width="1.2"/>
+<text x="940.0" y="110" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">Customer</text>
+<rect x="850" y="170" rx="8" ry="8" width="180" height="48" fill="#F3ECFF" stroke="#3b4756" stroke-width="1.2"/>
+<text x="940.0" y="200" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">CustomerGroup</text>
+<rect x="850" y="260" rx="8" ry="8" width="180" height="48" fill="#F3ECFF" stroke="#3b4756" stroke-width="1.2"/>
+<text x="940.0" y="290" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">Bill</text>
+<rect x="850" y="350" rx="8" ry="8" width="180" height="48" fill="#F3ECFF" stroke="#3b4756" stroke-width="1.2"/>
+<text x="940.0" y="380" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">BillItem</text>
+<rect x="850" y="440" rx="8" ry="8" width="180" height="48" fill="#F3ECFF" stroke="#3b4756" stroke-width="1.2"/>
+<text x="940.0" y="470" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">Payment</text>
+<rect x="850" y="530" rx="8" ry="8" width="180" height="48" fill="#F3ECFF" stroke="#3b4756" stroke-width="1.2"/>
+<text x="940.0" y="560" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">Return</text>
+<rect x="850" y="620" rx="8" ry="8" width="180" height="48" fill="#F3ECFF" stroke="#3b4756" stroke-width="1.2"/>
+<text x="940.0" y="650" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">ReturnItem</text>
+<rect x="1140" y="80" rx="8" ry="8" width="180" height="48" fill="#EAFBFF" stroke="#3b4756" stroke-width="1.2"/>
+<text x="1230.0" y="110" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">Supplier</text>
+<rect x="1140" y="170" rx="8" ry="8" width="180" height="48" fill="#EAFBFF" stroke="#3b4756" stroke-width="1.2"/>
+<text x="1230.0" y="200" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">PurchaseOrder</text>
+<rect x="1140" y="260" rx="8" ry="8" width="180" height="48" fill="#EAFBFF" stroke="#3b4756" stroke-width="1.2"/>
+<text x="1230.0" y="290" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">PurchaseOrderItem</text>
+<rect x="1140" y="350" rx="8" ry="8" width="180" height="48" fill="#EAFBFF" stroke="#3b4756" stroke-width="1.2"/>
+<text x="1230.0" y="380" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">GoodsReceiptNote</text>
+<rect x="1140" y="440" rx="8" ry="8" width="180" height="48" fill="#EAFBFF" stroke="#3b4756" stroke-width="1.2"/>
+<text x="1230.0" y="470" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">GoodsReceiptNoteItem</text>
+<rect x="1140" y="530" rx="8" ry="8" width="180" height="48" fill="#EAFBFF" stroke="#3b4756" stroke-width="1.2"/>
+<text x="1230.0" y="560" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">SupplierInvoice</text>
+<rect x="1140" y="620" rx="8" ry="8" width="180" height="48" fill="#EAFBFF" stroke="#3b4756" stroke-width="1.2"/>
+<text x="1230.0" y="650" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">SupplierInvoiceItem</text>
+<rect x="1140" y="710" rx="8" ry="8" width="180" height="48" fill="#EAFBFF" stroke="#3b4756" stroke-width="1.2"/>
+<text x="1230.0" y="740" text-anchor="middle" font-family="Arial" font-size="14" font-weight="600" fill="#0f172a">SupplierPayment</text>
+<rect x="1540" y="90" rx="8" ry="8" width="560" height="210" fill="#f8fafc" stroke="#cbd5e1"/>
+<text x="1560" y="124" font-family="Arial" font-size="18" font-weight="700" fill="#1f2937">Legend</text>
+<rect x="1560" y="136" width="20" height="14" fill="#E8F0FE" stroke="#64748b"/>
+<text x="1590" y="148" font-family="Arial" font-size="14" fill="#334155">Master</text>
+<rect x="1560" y="164" width="20" height="14" fill="#EAF7EE" stroke="#64748b"/>
+<text x="1590" y="176" font-family="Arial" font-size="14" fill="#334155">Accounts</text>
+<rect x="1560" y="192" width="20" height="14" fill="#FFF3E6" stroke="#64748b"/>
+<text x="1590" y="204" font-family="Arial" font-size="14" fill="#334155">Inventory</text>
+<rect x="1560" y="220" width="20" height="14" fill="#F3ECFF" stroke="#64748b"/>
+<text x="1590" y="232" font-family="Arial" font-size="14" fill="#334155">Sales/Returns/Customers</text>
+<rect x="1560" y="248" width="20" height="14" fill="#EAFBFF" stroke="#64748b"/>
+<text x="1590" y="260" font-family="Arial" font-size="14" fill="#334155">Suppliers/Procurement</text>
+</svg>

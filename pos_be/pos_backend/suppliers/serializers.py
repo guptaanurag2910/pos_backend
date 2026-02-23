@@ -155,32 +155,60 @@ class GoodsReceiptNoteDetailSerializer(GoodsReceiptNoteSerializer):
 
 
 class SupplierInvoiceItemSerializer(serializers.ModelSerializer):
+    product_name_resolved = serializers.CharField(source='product_ref.name', read_only=True)
+    product_id = serializers.CharField(write_only=True, required=False, allow_blank=True)
+
     class Meta:
         model = SupplierInvoiceItem
-        fields = '__all__'
+        fields = (
+            'id', 'invoice', 'product_ref', 'product_name_resolved', 'product_id', 'product_code', 'product_name',
+            'quantity', 'unit_price', 'discount', 'discount_type', 'tax_rate', 'tax_amount', 'total'
+        )
+        read_only_fields = ('id', 'invoice')
+
+    def validate(self, attrs):
+        legacy_product_id = attrs.pop('product_id', None)
+        if legacy_product_id and not attrs.get('product_code'):
+            attrs['product_code'] = legacy_product_id
+        return super().validate(attrs)
 
 class SupplierInvoiceSerializer(serializers.ModelSerializer):
-    items = SupplierInvoiceItemSerializer(many=True)
+    items = SupplierInvoiceItemSerializer(many=True, required=False)
+    supplier_name_resolved = serializers.CharField(source='supplier.name', read_only=True)
+    po_number_resolved = serializers.CharField(source='purchase_order.po_number', read_only=True)
+    grn_number_resolved = serializers.CharField(source='grn.grn_number', read_only=True)
+    due_amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
         model = SupplierInvoice
-        fields = '__all__'
+        fields = (
+            'id', 'invoice_number', 'supplier_invoice_number', 'supplier_name', 'supplier', 'supplier_name_resolved',
+            'po_number', 'purchase_order', 'po_number_resolved', 'grn_number', 'grn', 'grn_number_resolved',
+            'store', 'invoice_date', 'due_date', 'status', 'payment_terms',
+            'subtotal', 'discount_total', 'tax_total', 'shipping_charges', 'grand_total',
+            'amount_paid', 'due_amount', 'notes', 'created_by', 'created_at', 'updated_at', 'items'
+        )
+        read_only_fields = ('id', 'created_by', 'created_at', 'updated_at', 'amount_paid')
+        extra_kwargs = {
+            'invoice_number': {'required': False},
+        }
 
     def create(self, validated_data):
-        items_data = validated_data.pop('items')
+        items_data = validated_data.pop('items', [])
         invoice = SupplierInvoice.objects.create(**validated_data)
         for item_data in items_data:
             SupplierInvoiceItem.objects.create(invoice=invoice, **item_data)
         return invoice
 
     def update(self, instance, validated_data):
-        items_data = validated_data.pop('items')
-        SupplierInvoiceItem.objects.filter(invoice=instance).delete()
+        items_data = validated_data.pop('items', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
-        for item_data in items_data:
-            SupplierInvoiceItem.objects.create(invoice=instance, **item_data)
+        if items_data is not None:
+            SupplierInvoiceItem.objects.filter(invoice=instance).delete()
+            for item_data in items_data:
+                SupplierInvoiceItem.objects.create(invoice=instance, **item_data)
         return instance
 
 class SupplierPaymentSerializer(serializers.ModelSerializer):

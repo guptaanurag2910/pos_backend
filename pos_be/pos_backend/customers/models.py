@@ -22,6 +22,7 @@ class Customer(models.Model):
     anniversary = models.DateField(null=True, blank=True)
     
     notes = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -29,6 +30,10 @@ class Customer(models.Model):
     
     class Meta:
         ordering = ['name']
+        constraints = [
+            models.CheckConstraint(check=models.Q(loyalty_points__gte=0), name='customer_loyalty_points_gte_0'),
+            models.CheckConstraint(check=models.Q(total_purchases__gte=0), name='customer_total_purchases_gte_0'),
+        ]
     
     def __str__(self):
         return self.name or self.phone
@@ -50,6 +55,9 @@ class CustomerGroup(models.Model):
     
     class Meta:
         ordering = ['name']
+        constraints = [
+            models.CheckConstraint(check=models.Q(special_discount__gte=0), name='customer_group_special_discount_gte_0'),
+        ]
     
     def __str__(self):
         return self.name

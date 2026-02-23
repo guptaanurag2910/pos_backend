@@ -25,13 +25,14 @@ axiosInstance.interceptors.response.use(
     // Token expired or unauthorized
     if (
       error.response?.status === 401 &&
+      !String(originalRequest?.url || '').includes('/api/auth/token/refresh/') &&
       !originalRequest._retry &&
       localStorage.getItem('refresh_token')
     ) {
       originalRequest._retry = true;
       try {
         const refresh = localStorage.getItem('refresh_token');
-        const res = await axios.post('/api/auth/token/refresh/', { refresh });
+        const res = await axiosInstance.post('/api/auth/token/refresh/', { refresh });
 
         const newAccessToken = res.data.access;
         localStorage.setItem('access_token', newAccessToken);

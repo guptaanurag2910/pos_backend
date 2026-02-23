@@ -1,5 +1,9 @@
 from rest_framework import serializers
-from .models import Category, Product, StockRecord, StockLevel, StockTransfer, StockTransferItem
+from django.db.models import Sum
+from .models import (
+    Category, Product, StockRecord, StockLevel,
+    StockTransfer, StockTransferItem, InventoryUpload
+)
 
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -111,3 +115,10 @@ class StockTransferSerializer(serializers.ModelSerializer):
             'created_at', 'completed_by', 'completed_by_name', 'completed_at'
         )
         read_only_fields = ('id', 'created_by', 'created_at', 'completed_by', 'completed_at')
+
+
+class InventoryUploadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InventoryUpload
+        fields = ('id', 'file', 'uploaded_at')
+        read_only_fields = ('id', 'uploaded_at')

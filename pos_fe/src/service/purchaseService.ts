@@ -1,14 +1,6 @@
 import axiosInstance from '../utils/axiosInstance';
 
-const BASE_URL = '/api/';
-
-// Utility to get actual supplier list endpoint from root
-const getSupplierListUrl = async () => {
-  const linksRes = await axiosInstance.get(`${BASE_URL}suppliers/`);
-  const supplierUrl = linksRes.data?.suppliers;
-  if (!supplierUrl) throw new Error('Supplier endpoint not found in API root');
-  return supplierUrl;
-};
+const SUPPLIER_BASE_URL = '/api/suppliers/';
 
 // -----------------------------
 // Supplier APIs
@@ -16,42 +8,36 @@ const getSupplierListUrl = async () => {
 
 // Fetch all suppliers
 export const listSuppliers = async () => {
-  const url = await getSupplierListUrl();
-  const res = await axiosInstance.get(url);
+  const res = await axiosInstance.get(`${SUPPLIER_BASE_URL}suppliers/`);
   return res.data.results || res.data;
 };
 
 // Get details of a single supplier
 export const getSupplier = async (id: number) => {
-  const url = await getSupplierListUrl();
-  const res = await axiosInstance.get(`${url}${id}/`);
+  const res = await axiosInstance.get(`${SUPPLIER_BASE_URL}suppliers/${id}/`);
   return res.data;
 };
 
 // Create a new supplier
 export const createSupplier = async (data: any) => {
-  const url = await getSupplierListUrl();
-  const res = await axiosInstance.post(url, data);
+  const res = await axiosInstance.post(`${SUPPLIER_BASE_URL}suppliers/`, data);
   return res.data;
 };
 
 // Update an existing supplier
 export const updateSupplier = async (id: number, data: any) => {
-  const url = await getSupplierListUrl();
-  const res = await axiosInstance.put(`${url}${id}/`, data);
+  const res = await axiosInstance.put(`${SUPPLIER_BASE_URL}suppliers/${id}/`, data);
   return res.data;
 };
 
 // Delete a supplier
 export const deleteSupplier = async (id: number) => {
-  const url = await getSupplierListUrl();
-  return axiosInstance.delete(`${url}${id}/`);
+  return axiosInstance.delete(`${SUPPLIER_BASE_URL}suppliers/${id}/`);
 };
 
 // Search suppliers by query
 export const searchSuppliers = async (query: string) => {
-  const url = await getSupplierListUrl();
-  const res = await axiosInstance.get(url, {
+  const res = await axiosInstance.get(`${SUPPLIER_BASE_URL}suppliers/`, {
     params: { search: query },
   });
   return res.data.results || res.data;
@@ -59,13 +45,13 @@ export const searchSuppliers = async (query: string) => {
 
 // Get purchase order history of a supplier
 export const getSupplierPurchaseHistory = async (id: number) => {
-  const res = await axiosInstance.get(`${BASE_URL}suppliers/${id}/purchase_history/`);
+  const res = await axiosInstance.get(`${SUPPLIER_BASE_URL}suppliers/${id}/purchase_history/`);
   return res.data;
 };
 
 // Get payment history of a supplier
 export const getSupplierPaymentHistory = async (id: number) => {
-  const res = await axiosInstance.get(`${BASE_URL}suppliers/${id}/payment_history/`);
+  const res = await axiosInstance.get(`${SUPPLIER_BASE_URL}suppliers/${id}/payment_history/`);
   return res.data;
 };
 
@@ -74,32 +60,32 @@ export const getSupplierPaymentHistory = async (id: number) => {
 // -----------------------------
 
 export const listPurchaseOrders = async (params = {}) => {
-  const res = await axiosInstance.get(`${BASE_URL}suppliers/purchase-orders/`, { params });
+  const res = await axiosInstance.get(`${SUPPLIER_BASE_URL}purchase-orders/`, { params });
   return res.data;
 };
 
 export const getPurchaseOrder = async (id: number) => {
-  const res = await axiosInstance.get(`${BASE_URL}suppliers/purchase-orders/${id}/`);
+  const res = await axiosInstance.get(`${SUPPLIER_BASE_URL}purchase-orders/${id}/`);
   return res.data;
 };
 
 export const createPurchaseOrder = async (data: any) => {
-  const res = await axiosInstance.post(`${BASE_URL}suppliers/purchase-orders/`, data);
+  const res = await axiosInstance.post(`${SUPPLIER_BASE_URL}purchase-orders/`, data);
   return res.data;
 };
 
 export const updatePurchaseOrder = async (id: number, data: any) => {
-  const res = await axiosInstance.put(`${BASE_URL}suppliers/purchase-orders/${id}/`, data);
+  const res = await axiosInstance.put(`${SUPPLIER_BASE_URL}purchase-orders/${id}/`, data);
   return res.data;
 };
 
 export const deletePurchaseOrder = async (id: number) => {
-  return axiosInstance.delete(`${BASE_URL}suppliers/purchase-orders/${id}/`);
+  return axiosInstance.delete(`${SUPPLIER_BASE_URL}purchase-orders/${id}/`);
 };
 
 export const updatePurchaseOrderStatus = async (id: number, status: string) => {
   const res = await axiosInstance.post(
-    `${BASE_URL}suppliers/purchase-orders/${id}/update_status/`,
+    `${SUPPLIER_BASE_URL}purchase-orders/${id}/update_status/`,
     { status }
   );
   return res.data;
@@ -111,7 +97,7 @@ export const updatePurchaseOrderStatus = async (id: number, status: string) => {
 
 export const addPurchaseOrderItem = async (poId: number, item: any) => {
   const res = await axiosInstance.post(
-    `${BASE_URL}suppliers/purchase-orders/${poId}/items/`,
+    `${SUPPLIER_BASE_URL}purchase-orders/${poId}/items/`,
     item
   );
   return res.data;
@@ -119,7 +105,7 @@ export const addPurchaseOrderItem = async (poId: number, item: any) => {
 
 export const updatePurchaseOrderItem = async (poId: number, itemId: number, item: any) => {
   const res = await axiosInstance.put(
-    `${BASE_URL}suppliers/purchase-orders/${poId}/items/${itemId}/`,
+    `${SUPPLIER_BASE_URL}purchase-orders/${poId}/items/${itemId}/`,
     item
   );
   return res.data;
@@ -127,7 +113,7 @@ export const updatePurchaseOrderItem = async (poId: number, itemId: number, item
 
 export const deletePurchaseOrderItem = async (poId: number, itemId: number) => {
   return axiosInstance.delete(
-    `${BASE_URL}suppliers/purchase-orders/${poId}/items/${itemId}/`
+    `${SUPPLIER_BASE_URL}purchase-orders/${poId}/items/${itemId}/`
   );
 };
 
@@ -136,31 +122,31 @@ export const deletePurchaseOrderItem = async (poId: number, itemId: number) => {
 // -----------------------------
 
 export const listGRNs = async (params = {}) => {
-  const res = await axiosInstance.get(`/api/suppliers/grn/`, { params });
+  const res = await axiosInstance.get(`${SUPPLIER_BASE_URL}grn/`, { params });
   return res.data;
 };
 
 export const getGRN = async (id: number) => {
-  const res = await axiosInstance.get(`/api/suppliers/grn/${id}/`);
+  const res = await axiosInstance.get(`${SUPPLIER_BASE_URL}grn/${id}/`);
   return res.data;
 };
 
 export const createGRN = async (data: any) => {
-  const res = await axiosInstance.post(`/api/suppliers/grn/`, data);
+  const res = await axiosInstance.post(`${SUPPLIER_BASE_URL}grn/`, data);
   return res.data;
 };
 
 export const updateGRN = async (id: number, data: any) => {
-  const res = await axiosInstance.put(`/api/suppliers/grn/${id}/`, data);
+  const res = await axiosInstance.put(`${SUPPLIER_BASE_URL}grn/${id}/`, data);
   return res.data;
 };
 
 export const deleteGRN = async (id: number) => {
-  return axiosInstance.delete(`/api/suppliers/grn/${id}/`);
+  return axiosInstance.delete(`${SUPPLIER_BASE_URL}grn/${id}/`);
 };
 
 export const completeGRN = async (id: number) => {
-  const res = await axiosInstance.post(`/api/suppliers/grn/${id}/complete/`);
+  const res = await axiosInstance.post(`${SUPPLIER_BASE_URL}grn/${id}/complete/`);
   return res.data;
 };
 
@@ -169,17 +155,17 @@ export const completeGRN = async (id: number) => {
 // -----------------------------
 
 export const addGRNItem = async (grnId: number, item: any) => {
-  const res = await axiosInstance.post(`/api/suppliers/grn/${grnId}/items/`, item);
+  const res = await axiosInstance.post(`${SUPPLIER_BASE_URL}grn/${grnId}/items/`, item);
   return res.data;
 };
 
 export const updateGRNItem = async (grnId: number, itemId: number, item: any) => {
-  const res = await axiosInstance.put(`/api/suppliers/grn/${grnId}/items/${itemId}/`, item);
+  const res = await axiosInstance.put(`${SUPPLIER_BASE_URL}grn/${grnId}/items/${itemId}/`, item);
   return res.data;
 };
 
 export const deleteGRNItem = async (grnId: number, itemId: number) => {
-  return axiosInstance.delete(`/api/suppliers/grn/${grnId}/items/${itemId}/`);
+  return axiosInstance.delete(`${SUPPLIER_BASE_URL}grn/${grnId}/items/${itemId}/`);
 };
 
 // -----------------------------
@@ -187,27 +173,27 @@ export const deleteGRNItem = async (grnId: number, itemId: number) => {
 // -----------------------------
 
 export const listSupplierPayments = async (params = {}) => {
-  const res = await axiosInstance.get(`${BASE_URL}payments/`, { params });
+  const res = await axiosInstance.get(`${SUPPLIER_BASE_URL}payments/`, { params });
   return res.data;
 };
 
 export const getSupplierPayment = async (id: number) => {
-  const res = await axiosInstance.get(`${BASE_URL}payments/${id}/`);
+  const res = await axiosInstance.get(`${SUPPLIER_BASE_URL}payments/${id}/`);
   return res.data;
 };
 
 export const createSupplierPayment = async (data: any) => {
-  const res = await axiosInstance.post(`${BASE_URL}payments/`, data);
+  const res = await axiosInstance.post(`${SUPPLIER_BASE_URL}payments/`, data);
   return res.data;
 };
 
 export const updateSupplierPayment = async (id: number, data: any) => {
-  const res = await axiosInstance.put(`${BASE_URL}payments/${id}/`, data);
+  const res = await axiosInstance.put(`${SUPPLIER_BASE_URL}payments/${id}/`, data);
   return res.data;
 };
 
 export const deleteSupplierPayment = async (id: number) => {
-  return axiosInstance.delete(`${BASE_URL}payments/${id}/`);
+  return axiosInstance.delete(`${SUPPLIER_BASE_URL}payments/${id}/`);
 };
 
 // -----------------------------
@@ -215,27 +201,27 @@ export const deleteSupplierPayment = async (id: number) => {
 // -----------------------------
 
 export const listSupplierInvoices = async (params = {}) => {
-  const res = await axiosInstance.get(`${BASE_URL}suppliers/supplier-invoices/`, { params });
+  const res = await axiosInstance.get(`${SUPPLIER_BASE_URL}supplier-invoices/`, { params });
   return res.data;
 };
 
 export const getSupplierInvoice = async (id: number) => {
-  const res = await axiosInstance.get(`${BASE_URL}suppliers/supplier-invoices/${id}/`);
+  const res = await axiosInstance.get(`${SUPPLIER_BASE_URL}supplier-invoices/${id}/`);
   return res.data;
 };
 
 export const createSupplierInvoice = async (data: any) => {
-  const res = await axiosInstance.post(`${BASE_URL}suppliers/supplier-invoices/`, data);
+  const res = await axiosInstance.post(`${SUPPLIER_BASE_URL}supplier-invoices/`, data);
   return res.data;
 };
 
 export const updateSupplierInvoice = async (id: number, data: any) => {
-  const res = await axiosInstance.put(`${BASE_URL}suppliers/supplier-invoices/${id}/`, data);
+  const res = await axiosInstance.put(`${SUPPLIER_BASE_URL}supplier-invoices/${id}/`, data);
   return res.data;
 };
 
 export const deleteSupplierInvoice = async (id: number) => {
-  return axiosInstance.delete(`${BASE_URL}suppliers/supplier-invoices/${id}/`);
+  return axiosInstance.delete(`${SUPPLIER_BASE_URL}supplier-invoices/${id}/`);
 };
 
 // -----------------------------
@@ -243,15 +229,15 @@ export const deleteSupplierInvoice = async (id: number) => {
 // -----------------------------
 
 export const addSupplierInvoiceItem = async (invoiceId: number, item: any) => {
-  const res = await axiosInstance.post(`${BASE_URL}suppliers/supplier-invoices/${invoiceId}/items/`, item);
+  const res = await axiosInstance.post(`${SUPPLIER_BASE_URL}supplier-invoices/${invoiceId}/items/`, item);
   return res.data;
 };
 
 export const updateSupplierInvoiceItem = async (invoiceId: number, itemId: number, item: any) => {
-  const res = await axiosInstance.put(`${BASE_URL}suppliers/supplier-invoices/${invoiceId}/items/${itemId}/`, item);
+  const res = await axiosInstance.put(`${SUPPLIER_BASE_URL}supplier-invoices/${invoiceId}/items/${itemId}/`, item);
   return res.data;
 };
 
 export const deleteSupplierInvoiceItem = async (invoiceId: number, itemId: number) => {
-  return axiosInstance.delete(`${BASE_URL}suppliers/supplier-invoices/${invoiceId}/items/${itemId}/`);
+  return axiosInstance.delete(`${SUPPLIER_BASE_URL}supplier-invoices/${invoiceId}/items/${itemId}/`);
 };

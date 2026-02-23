@@ -96,6 +96,21 @@ class Bill(models.Model):
         if self.status == 'completed':
             return False
 
+        from inventory.models import StockRecord, StockLevel
+
+        # Pre-check stock before mutating anything
+        for item in self.items.select_related('product').all():
+            available_qty = StockLevel.objects.filter(
+                product=item.product,
+                store=self.store
+            ).aggregate(total=Sum('quantity')).get('total') or Decimal('0')
+
+            if available_qty < item.quantity:
+                raise ValueError(
+                    f"Insufficient stock for {item.product.name}. "
+                    f"Required {item.quantity}, available {available_qty}."
+                )
+
         self.status = 'completed'
         self.completed_at = timezone.now()
         if payment_method:
@@ -112,11 +127,35 @@ class Bill(models.Model):
 
         self.save()
 
-        # Inventory adjustments
-        for item in self.items.all():
-            from inventory.models import StockRecord, StockLevel
+        # Inventory adjustments (consume stock across all batches for the store)
+        for item in self.items.select_related('product').all():
+            remaining = Decimal(str(item.quantity))
+            stock_levels = StockLevel.objects.filter(
+                product=item.product,
+                store=self.store
+            ).order_by(
+                models.F('expiry_date').asc(nulls_last=True),
+                'updated_at',
+                'id'
+            )
 
-            # Log sale
+            for stock_level in stock_levels:
+                if remaining <= 0:
+                    break
+
+                level_qty = Decimal(str(stock_level.quantity))
+                if level_qty <= 0:
+                    continue
+
+                deduction = min(level_qty, remaining)
+                stock_level.quantity = level_qty - deduction
+                stock_level.save(update_fields=['quantity', 'updated_at'])
+                remaining -= deduction
+
+            if remaining > 0:
+                raise ValueError(f"Unable to allocate stock for {item.product.name} during completion.")
+
+            # Log sale movement
             StockRecord.objects.create(
                 product=item.product,
                 store=self.store,
@@ -125,15 +164,6 @@ class Bill(models.Model):
                 reference_id=self.bill_number,
                 created_by=self.cashier
             )
-
-            # Reduce current stock
-            stock_level, _ = StockLevel.objects.get_or_create(
-                product=item.product,
-                store=self.store,
-                defaults={'quantity': 0}
-            )
-            stock_level.quantity -= item.quantity
-            stock_level.save()
 
         return True
 
@@ -184,6 +214,8 @@ class Payment(models.Model):
         ('upi', 'UPI'),
         ('wallet', 'Wallet'),
         ('sodexo', 'Sodexo'),
+        ('store_credit', 'Store Credit'),
+        ('exchange', 'Exchange'),
     )
 
     PAYMENT_STATUS_CHOICES = (

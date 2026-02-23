@@ -52,6 +52,11 @@ class ChangePasswordSerializer(serializers.Serializer):
             raise serializers.ValidationError("Password must be at least 8 characters long.")
         return value
 
+
+class LogoutSerializer(serializers.Serializer):
+    refresh_token = serializers.CharField(required=True)
+
+
 class UserSessionSerializer(serializers.ModelSerializer):
     user = serializers.StringRelatedField()
     

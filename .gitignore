@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+my_venv/
+
+# Django/media/static artifacts
+*.sqlite3
+media/
+static/
+
+# Node
+node_modules/
+dist/
+build/
+
+# Notebooks / checkpoints
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log

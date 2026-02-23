@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 
 class Store(models.Model):
     name = models.CharField(max_length=255)
@@ -24,6 +25,13 @@ class Store(models.Model):
     
     class Meta:
         ordering = ['name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['is_main'],
+                condition=Q(is_main=True),
+                name='single_main_store'
+            ),
+        ]
     
     def __str__(self):
         return self.name

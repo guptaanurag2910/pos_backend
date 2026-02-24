@@ -73,23 +73,32 @@ class Bill(models.Model):
         """Calculate subtotal, tax, discount and total based on bill items"""
         items = self.items.all()
         if not items:
-            self.subtotal = 0
-            self.tax_total = 0
-            self.total = 0
+            self.subtotal = Decimal('0.00')
+            self.tax_total = Decimal('0.00')
+            self.round_off = Decimal('0.00')
+            self.total = Decimal('0.00')
             return
 
-        # Sum line item values
-        self.subtotal = sum(item.total for item in items)
-        self.tax_total = sum(item.tax_amount for item in items)
-        discounted_total = self.subtotal + self.tax_total - self.discount
+        # Subtotal is pre-tax line net (price*qty - line_discount).
+        # Tax is tracked separately to keep summary values consistent.
+        subtotal = Decimal('0.00')
+        tax_total = Decimal('0.00')
+        for item in items:
+            line_base = (Decimal(str(item.price)) * Decimal(str(item.quantity))) - Decimal(str(item.discount_amount))
+            subtotal += line_base
+            tax_total += Decimal(str(item.tax_amount))
 
-        # Round off to nearest rupee
-        if discounted_total % 1 < 0.5:
-            self.round_off = -discounted_total % 1
-        else:
-            self.round_off = 1 - discounted_total % 1
+        self.subtotal = subtotal.quantize(Decimal('0.01'))
+        self.tax_total = tax_total.quantize(Decimal('0.01'))
 
-        self.total = discounted_total + self.round_off
+        # Bill-level discount applies on bill amount after item-level discounts/taxes.
+        discounted_total = (self.subtotal + self.tax_total - Decimal(str(self.discount))).quantize(Decimal('0.01'))
+        if discounted_total < Decimal('0.00'):
+            discounted_total = Decimal('0.00')
+
+        # Keep round_off deterministic (no implicit integer rounding).
+        self.round_off = Decimal('0.00')
+        self.total = discounted_total
 
     def complete(self, payment_method=None):
         """Finalize bill, update loyalty and inventory"""

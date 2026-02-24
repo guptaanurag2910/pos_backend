@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import status, viewsets, generics
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -11,7 +13,8 @@ from django.db import transaction
 
 from .serializers import (
     UserSerializer, CustomTokenObtainPairSerializer, ChangePasswordSerializer, 
-    UserSessionSerializer, AuditLogSerializer, LogoutSerializer, RegistrationSerializer
+    UserSessionSerializer, AuditLogSerializer, LogoutSerializer, RegistrationSerializer,
+    RegistrationWithStoreSerializer
 )
 from .models import UserSession, AuditLog
 from .permissions import IsAdminUser, IsManagerUser, IsOwnerOrAdmin
@@ -19,17 +22,58 @@ from .utils import get_client_ip, get_user_agent
 from .throttles import LoginRateThrottle
 
 User = get_user_model()
+logger = logging.getLogger('accounts')
 
 
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegistrationSerializer
     permission_classes = [AllowAny]
 
+    def create(self, request, *args, **kwargs):
+        logger.info(f"register_requested email={request.data.get('email')}")
+        response = super().create(request, *args, **kwargs)
+        logger.info(f"register_completed status={response.status_code} email={request.data.get('email')}")
+        return response
+
+
+class RegisterWithStoreView(generics.GenericAPIView):
+    serializer_class = RegistrationWithStoreSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        logger.info(f"register_with_store_requested email={request.data.get('email')}")
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            user = serializer.save()
+            refresh = RefreshToken.for_user(user)
+
+        logger.info(f"register_with_store_completed user_id={user.id} email={user.email} store_id={user.store_id}")
+        return Response(
+            {
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user': {
+                    'user_id': user.id,
+                    'email': user.email,
+                    'name': user.name,
+                    'role': user.role,
+                    'store_id': user.store_id,
+                },
+                'store': {
+                    'id': user.store_id,
+                },
+            },
+            status=status.HTTP_201_CREATED
+        )
+
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
     throttle_classes = [LoginRateThrottle]
 
     def post(self, request, *args, **kwargs):
+        logger.info(f"login_requested email={request.data.get('email')}")
         response = super().post(request, *args, **kwargs)
         if response.status_code == status.HTTP_200_OK:
             user = User.objects.get(email=request.data['email'])
@@ -51,6 +95,9 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 ip_address=get_client_ip(request),
                 details={'user_agent': get_user_agent(request)}
             )
+            logger.info(f"login_completed user_id={user.id} email={user.email}")
+        else:
+            logger.warning(f"login_failed status={response.status_code} email={request.data.get('email')}")
         
         return response
 
@@ -60,6 +107,7 @@ class LogoutView(generics.GenericAPIView):
     
     def post(self, request):
         try:
+            logger.info(f"logout_requested user_id={request.user.id}")
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             refresh_token = serializer.validated_data['refresh_token']
@@ -84,8 +132,10 @@ class LogoutView(generics.GenericAPIView):
                 details={'user_agent': get_user_agent(request)}
             )
             
+            logger.info(f"logout_completed user_id={request.user.id}")
             return Response({"detail": "Successfully logged out."}, status=status.HTTP_200_OK)
         except Exception as e:
+            logger.error(f"logout_failed user_id={request.user.id} error={str(e)}")
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -109,7 +159,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         if user.role == 'admin':
-            return User.objects.all()
+            return User.objects.filter(store=user.store) if user.store else User.objects.none()
         elif user.role == 'manager':
             return User.objects.filter(store=user.store)
         return User.objects.filter(id=user.id)
@@ -122,6 +172,7 @@ class UserViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], permission_classes=[IsOwnerOrAdmin])
     def change_password(self, request, pk=None):
         user = self.get_object()
+        logger.info(f"change_password_requested actor_id={request.user.id} target_id={user.id}")
         serializer = ChangePasswordSerializer(data=request.data)
         
         if serializer.is_valid():
@@ -145,6 +196,7 @@ class UserViewSet(viewsets.ModelViewSet):
                 details={'action': 'password_change'}
             )
             
+            logger.info(f"change_password_completed actor_id={request.user.id} target_id={user.id}")
             return Response({"detail": "Password updated successfully"}, status=status.HTTP_200_OK)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -152,6 +204,7 @@ class UserViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def reset_password(self, request, pk=None):
         user = self.get_object()
+        logger.info(f"reset_password_requested actor_id={request.user.id} target_id={user.id}")
         new_password = request.data.get('new_password')
         if not new_password or len(new_password) < 8:
             return Response(
@@ -170,11 +223,13 @@ class UserViewSet(viewsets.ModelViewSet):
             ip_address=get_client_ip(request),
             details={'action': 'admin_password_reset'}
         )
+        logger.info(f"reset_password_completed actor_id={request.user.id} target_id={user.id}")
         return Response({"detail": "Password reset successfully"}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'])
     def force_logout_sessions(self, request, pk=None):
         target_user = self.get_object()
+        logger.info(f"force_logout_requested actor_id={request.user.id} target_id={target_user.id}")
         if request.user.role != 'admin' and request.user.id != target_user.id:
             return Response({"detail": "Not allowed."}, status=status.HTTP_403_FORBIDDEN)
 
@@ -200,11 +255,13 @@ class UserViewSet(viewsets.ModelViewSet):
                 details={'action': 'force_logout_sessions', 'count': count}
             )
 
+        logger.info(f"force_logout_completed actor_id={request.user.id} target_id={target_user.id} count={count}")
         return Response({"detail": f"Logged out {count} active session(s)."}, status=status.HTTP_200_OK)
     
     def perform_create(self, serializer):
         with transaction.atomic():
             user = serializer.save()
+            logger.info(f"user_create_completed actor_id={self.request.user.id} new_user_id={user.id}")
             
             # Log user creation
             AuditLog.objects.create(
@@ -220,6 +277,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         with transaction.atomic():
             user = serializer.save()
+            logger.info(f"user_update_completed actor_id={self.request.user.id} target_id={user.id}")
             
             # Log user update
             AuditLog.objects.create(
@@ -234,6 +292,7 @@ class UserViewSet(viewsets.ModelViewSet):
     
     def perform_destroy(self, instance):
         with transaction.atomic():
+            logger.info(f"user_soft_delete_requested actor_id={self.request.user.id} target_id={instance.id}")
             # Log user deletion
             AuditLog.objects.create(
                 user=self.request.user,

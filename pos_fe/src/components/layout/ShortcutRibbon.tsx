@@ -15,15 +15,23 @@ const BILLING_SHORTCUTS: ShortcutItem[] = [
   { keyLabel: 'F7', action: 'Discount' },
   { keyLabel: 'F8', action: 'Hold Bill' },
   { keyLabel: 'F9', action: 'Payment' },
-  { keyLabel: 'Ctrl+N', action: 'New Bill' },
+  { keyLabel: 'Arrows', action: 'Item Row/Field Navigation' },
+  { keyLabel: 'Enter', action: 'Next Row (Qty/Disc)' },
+  { keyLabel: 'Type Num', action: 'Edit Qty / Disc %' },
+  { keyLabel: 'Cmd/Ctrl+N', action: 'New Bill' },
   { keyLabel: 'Esc', action: 'Close Popup' },
+  { keyLabel: 'Mac', action: 'Use Fn + F-keys if needed' },
 ];
 
 const RETURNS_SHORTCUTS: ShortcutItem[] = [
   { keyLabel: 'F2', action: 'Search Returns/Bills' },
   { keyLabel: 'F4', action: 'Process Return' },
-  { keyLabel: 'Ctrl+R', action: 'Refresh List' },
+  { keyLabel: 'Arrows', action: 'Navigate Returns / Qty Rows' },
+  { keyLabel: 'Enter', action: 'Open Selected Return' },
+  { keyLabel: 'Cmd/Ctrl+Enter', action: 'Submit Return' },
+  { keyLabel: 'Cmd/Ctrl+R', action: 'Refresh List' },
   { keyLabel: 'Esc', action: 'Close Popup' },
+  { keyLabel: 'Mac', action: 'Use Fn + F-keys if needed' },
 ];
 
 const INVENTORY_SHORTCUTS: ShortcutItem[] = [

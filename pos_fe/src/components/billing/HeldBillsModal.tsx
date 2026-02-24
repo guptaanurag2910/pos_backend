@@ -120,6 +120,7 @@ const HeldBillsModal = ({ heldBills, onClose, onResume }: HeldBillsModalProps) =
 
                   <div className="flex space-x-2">
                     <button
+                      data-testid="held-bill-resume"
                       onClick={() => onResume(bill.id)}
                       className="w-full py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700"
                     >

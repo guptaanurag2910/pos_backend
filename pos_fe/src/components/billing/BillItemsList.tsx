@@ -1,13 +1,57 @@
 import { Trash2, Plus, Minus } from 'lucide-react';
+import { useRef } from 'react';
+import type { KeyboardEvent } from 'react';
 import { BillItem } from '../../types';
 
 interface BillItemsListProps {
   items: BillItem[];
   updateQuantity: (itemId: string, quantity: number) => void;
+  updateDiscount: (itemId: string, discountRate: number) => void;
   removeItem: (itemId: string) => void;
 }
 
-const BillItemsList = ({ items, updateQuantity, removeItem }: BillItemsListProps) => {
+const BillItemsList = ({ items, updateQuantity, updateDiscount, removeItem }: BillItemsListProps) => {
+  const inputRefs = useRef<Array<Array<HTMLInputElement | null>>>([]);
+
+  const focusCell = (row: number, col: number) => {
+    const maxRow = items.length - 1;
+    const safeRow = Math.max(0, Math.min(row, maxRow));
+    const safeCol = Math.max(0, Math.min(col, 1));
+    inputRefs.current[safeRow]?.[safeCol]?.focus();
+    inputRefs.current[safeRow]?.[safeCol]?.select?.();
+  };
+
+  const handleGridNav = (
+    event: KeyboardEvent<HTMLInputElement>,
+    rowIndex: number,
+    colIndex: number
+  ) => {
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      focusCell(rowIndex - 1, colIndex);
+      return;
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      focusCell(rowIndex + 1, colIndex);
+      return;
+    }
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      focusCell(rowIndex, colIndex - 1);
+      return;
+    }
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      focusCell(rowIndex, colIndex + 1);
+      return;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      focusCell(rowIndex + 1, colIndex);
+    }
+  };
+
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -40,14 +84,15 @@ const BillItemsList = ({ items, updateQuantity, removeItem }: BillItemsListProps
           <tr className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
             <th className="px-4 py-3">Item</th>
             <th className="px-4 py-3 text-center">Qty</th>
-            <th className="px-4 py-3 text-right">MRP</th>
-            <th className="px-4 py-3 text-right">Rate</th>
+            <th className="px-4 py-3 text-center">Disc %</th>
+            <th className="px-4 py-3 text-right">MRP (Ref)</th>
+            <th className="px-4 py-3 text-right">Selling Rate</th>
             <th className="px-4 py-3 text-right">Total</th>
             <th className="px-4 py-3 w-10"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-          {items.map((item) => (
+          {items.map((item, index) => (
             <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 animate-fade-in">
               <td className="px-4 py-3">
                 <div>
@@ -65,11 +110,16 @@ const BillItemsList = ({ items, updateQuantity, removeItem }: BillItemsListProps
                     <Minus size={14} />
                   </button>
                   <input
+                    ref={(el) => {
+                      if (!inputRefs.current[index]) inputRefs.current[index] = [];
+                      inputRefs.current[index][0] = el;
+                    }}
                     type="number"
                     min="1"
                     value={item.quantity}
+                    onKeyDown={(e) => handleGridNav(e, index, 0)}
                     onChange={(e) => {
-                      const value = parseInt(e.target.value);
+                      const value = Number(e.target.value);
                       if (!isNaN(value) && value > 0) {
                         updateQuantity(item.id, value);
                       }
@@ -85,13 +135,37 @@ const BillItemsList = ({ items, updateQuantity, removeItem }: BillItemsListProps
                 </div>
               </td>
 
+              <td className="px-4 py-3 text-center">
+                <input
+                  ref={(el) => {
+                    if (!inputRefs.current[index]) inputRefs.current[index] = [];
+                    inputRefs.current[index][1] = el;
+                  }}
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={Number(item.discountRate || 0)}
+                  onKeyDown={(e) => handleGridNav(e, index, 1)}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    if (!isNaN(value)) {
+                      updateDiscount(item.id, value);
+                    }
+                  }}
+                  className="w-16 mx-auto text-center border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded text-sm"
+                />
+              </td>
+
               <td className="px-4 py-3 text-sm text-right text-gray-800 dark:text-gray-200">
                 ₹{Number(item.mrp || item.price || 0).toFixed(2)}
               </td>
 
               <td className="px-4 py-3 text-sm text-right text-gray-800 dark:text-gray-200">
                 ₹{Number(item.price || 0).toFixed(2)}
-                <div className="text-xs text-gray-500 dark:text-gray-400">Tax: {item.tax}%</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">
+                  Disc: ₹{Number(item.discount || 0).toFixed(2)} | Tax: {Number(item.tax || 0).toFixed(2)}%
+                </div>
               </td>
 
               <td className="px-4 py-3 text-sm font-medium text-right text-gray-800 dark:text-gray-200">

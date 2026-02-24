@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -24,6 +26,8 @@ from accounts.models import AuditLog
 from accounts.utils import get_client_ip
 from stores.models import Store
 
+logger = logging.getLogger('suppliers')
+
 
 def _to_decimal(value, default='0'):
     try:
@@ -44,12 +48,15 @@ def _resolve_store(request):
     """
     user_store = getattr(request.user, 'store', None)
     if user_store:
+        logger.info(f"store_resolved_from_user user_id={request.user.id} store_id={user_store.id}")
         return user_store
 
     store_id = request.data.get('store')
     if store_id:
         try:
-            return Store.objects.get(id=store_id, is_active=True)
+            store = Store.objects.get(id=store_id, is_active=True)
+            logger.info(f"store_resolved_from_payload user_id={request.user.id} store_id={store.id}")
+            return store
         except Store.DoesNotExist:
             raise ValidationError({"store": "Invalid or inactive store."})
 
@@ -57,6 +64,7 @@ def _resolve_store(request):
     if not fallback:
         fallback = Store.objects.filter(is_active=True).order_by('id').first()
     if fallback:
+        logger.info(f"store_resolved_from_fallback user_id={request.user.id} store_id={fallback.id}")
         return fallback
 
     raise ValidationError(
@@ -88,6 +96,7 @@ class SupplierViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         with transaction.atomic():
             supplier = serializer.save(created_by=self.request.user)
+            logger.info(f"supplier_create_completed actor_id={self.request.user.id} supplier_id={supplier.id}")
             
             # Log the action
             AuditLog.objects.create(
@@ -125,6 +134,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     def update_status(self, request, pk=None):
         purchase_order = self.get_object()
         new_status = request.data.get('status')
+        logger.info(f"po_status_requested actor_id={request.user.id} po_id={purchase_order.id} new_status={new_status}")
         
         valid_statuses = dict(PurchaseOrder.STATUS_CHOICES).keys()
         if not new_status or new_status not in valid_statuses:
@@ -150,6 +160,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     'new_status': new_status
                 }
             )
+        logger.info(f"po_status_completed actor_id={request.user.id} po_id={purchase_order.id} new_status={new_status}")
         
         serializer = self.get_serializer(purchase_order)
         return Response(serializer.data)
@@ -176,6 +187,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
             items_data = serializer.validated_data.pop('items', [])  # Extract items here
             po = serializer.save(po_number=po_number, store=store, created_by=self.request.user)
+            logger.info(f"po_create_started actor_id={self.request.user.id} po_id={po.id} po_number={po.po_number}")
 
             # Create each PurchaseOrderItem
             for item_data in items_data:
@@ -192,6 +204,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 object_repr=po.po_number,
                 ip_address=get_client_ip(self.request)
             )
+            logger.info(f"po_create_completed actor_id={self.request.user.id} po_id={po.id} items={len(items_data)}")
 
 class PurchaseOrderItemViewSet(viewsets.ModelViewSet):
     serializer_class = PurchaseOrderItemSerializer
@@ -365,6 +378,7 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
         grn = self.get_object()
+        logger.info(f"grn_complete_requested actor_id={request.user.id} grn_id={grn.id}")
         
         if grn.status == 'completed':
             return Response(
@@ -446,6 +460,7 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
                 ip_address=get_client_ip(request),
                 details={'action': 'complete'}
             )
+        logger.info(f"grn_complete_completed actor_id={request.user.id} grn_id={grn.id} status={grn.status}")
         
         serializer = self.get_serializer(grn)
         return Response(serializer.data)
@@ -473,6 +488,7 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
             items_data = self.request.data.get('items', [])
             po_items_data = self.request.data.get('po_items', [])
             grn = serializer.save(grn_number=grn_number, store=store, created_by=self.request.user)
+            logger.info(f"grn_create_started actor_id={self.request.user.id} grn_id={grn.id} grn_number={grn.grn_number}")
 
             # Create GRN Items
             for item in items_data:
@@ -522,6 +538,7 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
                 object_repr=grn.grn_number,
                 ip_address=get_client_ip(self.request)
             )
+            logger.info(f"grn_create_completed actor_id={self.request.user.id} grn_id={grn.id} items={len(items_data)}")
 
 
 class GoodsReceiptNoteItemViewSet(viewsets.ModelViewSet):
@@ -613,6 +630,7 @@ class SupplierInvoiceViewSet(viewsets.ModelViewSet):
                     if serializer.validated_data.get('grn') else None
                 )
             )
+            logger.info(f"supplier_invoice_create_completed actor_id={self.request.user.id} invoice_id={invoice.id} invoice_number={invoice.invoice_number}")
 
             AuditLog.objects.create(
                 user=self.request.user,
@@ -626,6 +644,7 @@ class SupplierInvoiceViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         with transaction.atomic():
             invoice = serializer.save()
+            logger.info(f"supplier_invoice_update_completed actor_id={self.request.user.id} invoice_id={invoice.id}")
             AuditLog.objects.create(
                 user=self.request.user,
                 action='update',
@@ -639,6 +658,7 @@ class SupplierInvoiceViewSet(viewsets.ModelViewSet):
     def update_status(self, request, pk=None):
         invoice = self.get_object()
         new_status = request.data.get('status')
+        logger.info(f"supplier_invoice_status_requested actor_id={request.user.id} invoice_id={invoice.id} new_status={new_status}")
         valid_statuses = dict(SupplierInvoice.STATUS_CHOICES).keys()
         if new_status not in valid_statuses:
             return Response(
@@ -647,6 +667,7 @@ class SupplierInvoiceViewSet(viewsets.ModelViewSet):
             )
         invoice.status = new_status
         invoice.save(update_fields=['status', 'updated_at'])
+        logger.info(f"supplier_invoice_status_completed actor_id={request.user.id} invoice_id={invoice.id} new_status={new_status}")
         return Response(self.get_serializer(invoice).data)
 
 
@@ -719,6 +740,7 @@ class SupplierPaymentViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         with transaction.atomic():
             payment = serializer.save(created_by=self.request.user)
+            logger.info(f"supplier_payment_create_completed actor_id={self.request.user.id} payment_id={payment.id} amount={payment.amount}")
             
             # Log the action
             AuditLog.objects.create(

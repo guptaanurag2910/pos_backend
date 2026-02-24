@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -11,6 +13,9 @@ from .bootstrap_import import StoreBootstrapImporter
 from accounts.permissions import IsAdminUser, IsManagerUser
 from accounts.models import AuditLog
 from accounts.utils import get_client_ip
+
+logger = logging.getLogger('stores')
+
 
 class StoreViewSet(viewsets.ModelViewSet):
     queryset = Store.objects.all()
@@ -126,6 +131,9 @@ class StoreViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='bootstrap-import')
     def bootstrap_import(self, request, pk=None):
         store = self.get_object()
+        logger.info(
+            f"Store bootstrap import started store_id={store.id} store_code={store.code} user_id={request.user.id}"
+        )
         serializer = StoreBootstrapImportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -138,6 +146,9 @@ class StoreViewSet(viewsets.ModelViewSet):
         try:
             result = importer.run(serializer.validated_data['file'])
         except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                f"Store bootstrap import failed store_id={store.id} store_code={store.code} user_id={request.user.id} error={exc}"
+            )
             return Response(
                 {'detail': str(exc), 'errors': importer.errors, 'stats': importer.stats},
                 status=status.HTTP_400_BAD_REQUEST
@@ -159,6 +170,10 @@ class StoreViewSet(viewsets.ModelViewSet):
         )
 
         http_status = status.HTTP_207_MULTI_STATUS if result.get('errors') else status.HTTP_200_OK
+        logger.info(
+            f"Store bootstrap import completed store_id={store.id} store_code={store.code} user_id={request.user.id} "
+            f"status={http_status} errors={len(result.get('errors', []))} warnings={len(result.get('warnings', []))}"
+        )
         return Response(result, status=http_status)
     
     def perform_create(self, serializer):

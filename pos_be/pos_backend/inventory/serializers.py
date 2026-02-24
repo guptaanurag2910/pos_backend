@@ -71,8 +71,20 @@ class ProductSerializer(serializers.ModelSerializer):
             total=Sum('quantity')
         )['total'] or 0
 
+    def _resolve_scope_store_id(self):
+        request = self.context.get('request')
+        if not request or not hasattr(request, 'user') or not request.user.is_authenticated:
+            return None
+
+        if request.user.role == 'admin':
+            return request.query_params.get('store')
+        return getattr(request.user, 'store_id', None)
+
     def get_stock_details(self, obj):
         stock_qs = StockLevel.objects.filter(product=obj).select_related('store')
+        store_id = self._resolve_scope_store_id()
+        if store_id:
+            stock_qs = stock_qs.filter(store_id=store_id)
         return ProductStockLevelSerializer(stock_qs, many=True).data
 
 class StockRecordSerializer(serializers.ModelSerializer):

@@ -1,8 +1,11 @@
 from rest_framework import serializers
 from django.db import transaction
+from django.db.models import Sum
 from .models import Bill, BillItem, Payment
-from inventory.models import Product
+from inventory.models import Product, StockLevel
 from customers.models import Customer
+from stores.models import Store
+from decimal import Decimal
 
 class BillItemSerializer(serializers.ModelSerializer):
     product_name = serializers.StringRelatedField(source='product', read_only=True)
@@ -15,10 +18,53 @@ class BillItemSerializer(serializers.ModelSerializer):
             'total', 'created_at'
         )
         read_only_fields = ('id', 'bill', 'tax_amount', 'total', 'created_at')
+
+    def validate(self, attrs):
+        product = attrs.get('product') or getattr(self.instance, 'product', None)
+        bill = attrs.get('bill') or getattr(self.instance, 'bill', None)
+        quantity = attrs.get('quantity', getattr(self.instance, 'quantity', None))
+
+        if not product or not bill or quantity is None:
+            return attrs
+
+        available_raw = StockLevel.objects.filter(
+            product=product,
+            store=bill.store,
+        ).aggregate(total=Sum('quantity')).get('total') or Decimal('0')
+        available = Decimal(str(available_raw))
+        requested = Decimal(str(quantity))
+
+        if requested > available:
+            raise serializers.ValidationError({
+                'quantity': (
+                    f"Insufficient stock for {product.name}. "
+                    f"Available: {available}, requested: {requested}."
+                )
+            })
+
+        return attrs
     
     def create(self, validated_data):
-        # Get product tax rate
         product = validated_data.get('product')
+        bill = validated_data.get('bill')
+        bill_id = validated_data.get('bill_id')
+        if bill is None and bill_id is not None:
+            bill = Bill.objects.filter(id=bill_id).first()
+
+        quantity = validated_data.get('quantity')
+        if product and bill and quantity is not None:
+            available_raw = StockLevel.objects.filter(
+                product=product,
+                store=bill.store,
+            ).aggregate(total=Sum('quantity')).get('total') or Decimal('0')
+            available = Decimal(str(available_raw))
+            requested = Decimal(str(quantity))
+            if requested > available:
+                raise serializers.ValidationError(
+                    f"Insufficient stock for {product.name}. Available: {available}, requested: {requested}."
+                )
+
+        # Get product tax rate
         validated_data['tax_rate'] = product.tax
         
         # Calculate totals
@@ -94,6 +140,28 @@ class CreateBillSerializer(serializers.ModelSerializer):
         model = Bill
         fields = ('customer_id', 'notes', 'items', 'points_to_redeem', 'bill_discount')
 
+    def _resolve_store_for_validation(self):
+        resolved_store = self.context.get('resolved_store')
+        if resolved_store is not None:
+            return resolved_store
+
+        request = self.context.get('request')
+        if not request:
+            return None
+
+        user_store = getattr(request.user, 'store', None)
+        if user_store:
+            return user_store
+
+        store_id = request.data.get('store')
+        if store_id:
+            return Store.objects.filter(id=store_id, is_active=True).first()
+
+        fallback = Store.objects.filter(is_main=True, is_active=True).first()
+        if fallback:
+            return fallback
+        return Store.objects.filter(is_active=True).order_by('id').first()
+
     def validate(self, attrs):
         items = attrs.get('items') or []
         if len(items) == 0:
@@ -103,6 +171,29 @@ class CreateBillSerializer(serializers.ModelSerializer):
             quantity = item.get('quantity')
             if quantity is None or quantity <= 0:
                 raise serializers.ValidationError({'items': f'Item #{idx} must have quantity greater than zero.'})
+
+        store = self._resolve_store_for_validation()
+        if store:
+            requested_by_product = {}
+            for item in items:
+                product = item.get('product')
+                qty = Decimal(str(item.get('quantity')))
+                requested_by_product[product.id] = requested_by_product.get(product.id, Decimal('0')) + qty
+
+            for product_id, requested in requested_by_product.items():
+                available_raw = StockLevel.objects.filter(
+                    product_id=product_id,
+                    store=store,
+                ).aggregate(total=Sum('quantity')).get('total') or Decimal('0')
+                available = Decimal(str(available_raw))
+                if requested > available:
+                    product_name = Product.objects.filter(id=product_id).values_list('name', flat=True).first() or f"Product {product_id}"
+                    raise serializers.ValidationError({
+                        'items': (
+                            f"Insufficient stock for {product_name}. "
+                            f"Available: {available}, requested: {requested}."
+                        )
+                    })
 
         return attrs
 
@@ -115,6 +206,24 @@ class CreateBillSerializer(serializers.ModelSerializer):
             # Inject bill discount before creation
             validated_data['discount'] = bill_discount
             bill = Bill.objects.create(**validated_data)
+
+            requested_by_product = {}
+            for item_data in items_data:
+                product = item_data['product']
+                qty = Decimal(str(item_data['quantity']))
+                requested_by_product[product.id] = requested_by_product.get(product.id, Decimal('0')) + qty
+
+            for product_id, requested in requested_by_product.items():
+                available_raw = StockLevel.objects.filter(
+                    product_id=product_id,
+                    store=bill.store,
+                ).aggregate(total=Sum('quantity')).get('total') or Decimal('0')
+                available = Decimal(str(available_raw))
+                if requested > available:
+                    product_name = Product.objects.filter(id=product_id).values_list('name', flat=True).first() or f"Product {product_id}"
+                    raise serializers.ValidationError(
+                        f"Insufficient stock for {product_name}. Available: {available}, requested: {requested}."
+                    )
 
             # Create and save each BillItem so tax/total is calculated
             for item_data in items_data:

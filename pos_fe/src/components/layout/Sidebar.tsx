@@ -15,6 +15,7 @@ import {
   Truck,
   Receipt,
   CreditCard,
+  UploadCloud,
   ChevronDown,
   ChevronRight,
   RotateCcw
@@ -93,6 +94,14 @@ const Sidebar = () => {
   };
 
   const isActive = (path: string) => location.pathname === path;
+  const role = user?.role;
+  const canSeeDashboard = role === 'admin' || role === 'manager';
+  const canSeeInventory = role === 'admin' || role === 'manager';
+  const canSeePurchase = role === 'admin' || role === 'manager';
+  const canSeeCustomers = role === 'admin' || role === 'manager';
+  const canSeeReports = role === 'admin' || role === 'manager';
+  const canSeeSettings = role === 'admin';
+  const canSeeUsers = role === 'admin';
 
   return (
     <>
@@ -131,13 +140,15 @@ const Sidebar = () => {
         </div>
 
         <nav className="p-4 space-y-2 overflow-y-auto h-full pb-20">
-          <NavItem
-            to="/dashboard"
-            icon={<LayoutDashboard size={20} />}
-            label="Dashboard"
-            active={isActive('/dashboard')}
-            onClick={closeMobileMenu}
-          />
+          {canSeeDashboard && (
+            <NavItem
+              to="/dashboard"
+              icon={<LayoutDashboard size={20} />}
+              label="Dashboard"
+              active={isActive('/dashboard')}
+              onClick={closeMobileMenu}
+            />
+          )}
           <NavItem
             to="/billing"
             icon={<ShoppingCart size={20} />}
@@ -152,75 +163,85 @@ const Sidebar = () => {
             active={isActive('/returns')}
             onClick={closeMobileMenu}
           />
-          <NavItem
-            to="/inventory"
-            icon={<Package size={20} />}
-            label="Inventory"
-            active={isActive('/inventory')}
-            onClick={closeMobileMenu}
-          />
+          {canSeeInventory && (
+            <NavItem
+              to="/inventory"
+              icon={<Package size={20} />}
+              label="Inventory"
+              active={isActive('/inventory')}
+              onClick={closeMobileMenu}
+            />
+          )}
 
 
           {/* Purchase Management Group */}
-          <NavGroup
-            label="Purchase Management"
-            icon={<ShoppingBag size={20} />}
-            isOpen={isPurchaseOpen}
-            onToggle={() => setIsPurchaseOpen(!isPurchaseOpen)}
-          >
-            {/* <NavItem
-              to="/purchase/requisitions"
-              icon={<FileText size={16} />}
-              label="Requisitions"
-              active={isActive('/purchase/requisitions')}
-              onClick={closeMobileMenu}
-            /> */}
-            <NavItem
-              to="/purchase/orders"
-              icon={<ShoppingBag size={16} />}
-              label="Purchase Orders"
-              active={isActive('/purchase/orders')}
-              onClick={closeMobileMenu}
-            />
-            <NavItem
-              to="/purchase/grn"
-              icon={<Truck size={16} />}
-              label="Goods Receipt"
-              active={isActive('/purchase/grn')}
-              onClick={closeMobileMenu}
-            />
-            <NavItem
-              to="/purchase/invoices"
-              icon={<Receipt size={16} />}
-              label="Supplier Invoices"
-              active={isActive('/purchase/invoices')}
-              onClick={closeMobileMenu}
-            />
-            <NavItem
-              to="/purchase/payments"
-              icon={<CreditCard size={16} />}
-              label="Payments"
-              active={isActive('/purchase/payments')}
-              onClick={closeMobileMenu}
-            />
-          </NavGroup>
+          {canSeePurchase && (
+            <NavGroup
+              label="Purchase Management"
+              icon={<ShoppingBag size={20} />}
+              isOpen={isPurchaseOpen}
+              onToggle={() => setIsPurchaseOpen(!isPurchaseOpen)}
+            >
+              <NavItem
+                to="/purchase/orders"
+                icon={<ShoppingBag size={16} />}
+                label="Purchase Orders"
+                active={isActive('/purchase/orders')}
+                onClick={closeMobileMenu}
+              />
+              <NavItem
+                to="/purchase/grn"
+                icon={<Truck size={16} />}
+                label="Goods Receipt"
+                active={isActive('/purchase/grn')}
+                onClick={closeMobileMenu}
+              />
+              <NavItem
+                to="/purchase/invoices"
+                icon={<Receipt size={16} />}
+                label="Supplier Invoices"
+                active={isActive('/purchase/invoices')}
+                onClick={closeMobileMenu}
+              />
+              <NavItem
+                to="/purchase/payments"
+                icon={<CreditCard size={16} />}
+                label="Payments"
+                active={isActive('/purchase/payments')}
+                onClick={closeMobileMenu}
+              />
+            </NavGroup>
+          )}
 
           
-          <NavItem
-            to="/customers"
-            icon={<Users size={20} />}
-            label="Customers"
-            active={isActive('/customers')}
-            onClick={closeMobileMenu}
-          />
-          <NavItem
-            to="/reports"
-            icon={<BarChart2 size={20} />}
-            label="Reports"
-            active={isActive('/reports')}
-            onClick={closeMobileMenu}
-          />
-          {user?.role === 'admin' && (
+          {canSeeCustomers && (
+            <NavItem
+              to="/customers"
+              icon={<Users size={20} />}
+              label="Customers"
+              active={isActive('/customers')}
+              onClick={closeMobileMenu}
+            />
+          )}
+          {canSeeReports && (
+            <NavItem
+              to="/reports"
+              icon={<BarChart2 size={20} />}
+              label="Reports"
+              active={isActive('/reports')}
+              onClick={closeMobileMenu}
+            />
+          )}
+          {canSeeUsers && (
+            <NavItem
+              to="/initial-upload"
+              icon={<UploadCloud size={20} />}
+              label="Initial Upload"
+              active={isActive('/initial-upload')}
+              onClick={closeMobileMenu}
+            />
+          )}
+          {canSeeUsers && (
             <NavItem
               to="/users"
               icon={<UserPlus size={20} />}
@@ -229,13 +250,15 @@ const Sidebar = () => {
               onClick={closeMobileMenu}
             />
           )}
-          <NavItem
-            to="/settings"
-            icon={<Settings size={20} />}
-            label="Settings"
-            active={isActive('/settings')}
-            onClick={closeMobileMenu}
-          />
+          {canSeeSettings && (
+            <NavItem
+              to="/settings"
+              icon={<Settings size={20} />}
+              label="Settings"
+              active={isActive('/settings')}
+              onClick={closeMobileMenu}
+            />
+          )}
         </nav>
 
         <div className="absolute bottom-0 w-full p-4 border-t dark:border-gray-700">

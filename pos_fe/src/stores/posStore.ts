@@ -27,9 +27,10 @@ interface POSState {
 interface POSStore extends POSState {
   loadProducts: () => Promise<void>;
   searchProducts: (query: string) => Product[];
-  addProductToBill: (product: Product, quantity: number) => void;
+  addProductToBill: (product: Product, quantity: number) => { ok: boolean; message?: string };
   removeItemFromBill: (itemId: string) => void;
   updateItemQuantity: (itemId: string, quantity: number) => void;
+  updateItemDiscount: (itemId: string, discountRate: number) => void;
   applyDiscount: (amount: number, isPercentage: boolean) => void;
   setCustomer: (customer: Customer | null) => void;
   searchCustomers: (query: string) => Customer[];
@@ -42,6 +43,40 @@ interface POSStore extends POSState {
 const toNumber = (value: any, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const round2 = (value: number) => parseFloat(value.toFixed(2));
+
+const computeItemTotals = (item: any) => {
+  const quantity = toNumber(item?.quantity, 0);
+  const price = toNumber(item?.price, 0);
+  const taxRate = toNumber(item?.tax, 0);
+  const discountRate = Math.max(0, Math.min(100, toNumber(item?.discountRate, 0)));
+
+  const gross = price * quantity;
+  const discountAmount = gross * (discountRate / 100);
+  const taxable = gross - discountAmount;
+  const taxAmount = taxable * (taxRate / 100);
+  const total = taxable + taxAmount;
+
+  return {
+    discountRate,
+    discountAmount: round2(discountAmount),
+    taxAmount: round2(taxAmount),
+    total: round2(total),
+    subtotalExTax: round2(taxable),
+  };
+};
+
+const computeBillTotals = (items: any[], billDiscount: number) => {
+  const subtotal = round2(
+    items.reduce((sum, item) => sum + computeItemTotals(item).subtotalExTax, 0)
+  );
+  const taxTotal = round2(
+    items.reduce((sum, item) => sum + computeItemTotals(item).taxAmount, 0)
+  );
+  const total = round2(subtotal + taxTotal - toNumber(billDiscount, 0));
+  return { subtotal, taxTotal, total };
 };
 
 const normalizeProduct = (product: any): Product => {
@@ -171,44 +206,70 @@ export const usePOSStore = create<POSStore>((set, get) => ({
   },
 
   addProductToBill: (product: Product, quantity: number) => {
+    let result: { ok: boolean; message?: string } = { ok: true };
     set((state) => {
+      const availableStock = toNumber(product.stock, 0);
+      if (availableStock <= 0) {
+        result = { ok: false, message: `${product.name} is out of stock.` };
+        return state;
+      }
+
       const existingItemIndex = state.currentBill.items.findIndex((item) => item.productId === product.id);
       let newItems;
 
       if (existingItemIndex !== -1) {
         newItems = [...state.currentBill.items];
         const existingItem = newItems[existingItemIndex];
-        const newQuantity = existingItem.quantity + quantity;
+        const requestedQuantity = existingItem.quantity + quantity;
+        const newQuantity = Math.min(requestedQuantity, availableStock);
+        if (newQuantity <= existingItem.quantity) {
+          result = {
+            ok: false,
+            message: `Cannot add more ${product.name}. Available stock: ${availableStock}.`,
+          };
+          return state;
+        }
+        const computed = computeItemTotals({
+          ...existingItem,
+          quantity: newQuantity,
+        });
         newItems[existingItemIndex] = {
           ...existingItem,
           quantity: newQuantity,
-          total: parseFloat((product.price * newQuantity).toFixed(2)),
+          discountRate: computed.discountRate,
+          discount: computed.discountAmount,
+          total: computed.total,
         };
       } else {
+        const safeQuantity = Math.min(quantity, availableStock);
+        if (safeQuantity <= 0) {
+          result = { ok: false, message: `${product.name} is out of stock.` };
+          return state;
+        }
+        const computed = computeItemTotals({
+          quantity: safeQuantity,
+          price: product.price,
+          tax: product.tax,
+          discountRate: 0,
+        });
         const newItem: BillItem = {
           id: `item_${Date.now()}`,
           productId: product.id,
           productName: product.name,
-          quantity,
+          quantity: safeQuantity,
           price: product.price,
           tax: product.tax,
-          discount: 0,
-          discountRate: 0,
-          total: parseFloat((product.price * quantity).toFixed(2)),
+          discount: computed.discountAmount,
+          discountRate: computed.discountRate,
+          total: computed.total,
         } as BillItem;
         newItems = [...state.currentBill.items, newItem];
       }
 
-      const subtotal = parseFloat(newItems.reduce((sum, item) => sum + item.total, 0).toFixed(2));
-      const taxTotal = parseFloat(
-        newItems
-          .reduce((sum, item) => {
-            const itemTaxAmount = (item.price * item.quantity * item.tax) / 100;
-            return sum + itemTaxAmount;
-          }, 0)
-          .toFixed(2)
+      const { subtotal, taxTotal, total } = computeBillTotals(
+        newItems,
+        state.currentBill.discount
       );
-      const total = parseFloat((subtotal + taxTotal - state.currentBill.discount).toFixed(2));
 
       return {
         ...state,
@@ -221,21 +282,16 @@ export const usePOSStore = create<POSStore>((set, get) => ({
         },
       };
     });
+    return result;
   },
 
   removeItemFromBill: (itemId: string) => {
     set((state) => {
       const newItems = state.currentBill.items.filter((item) => item.id !== itemId);
-      const subtotal = parseFloat(newItems.reduce((sum, item) => sum + item.total, 0).toFixed(2));
-      const taxTotal = parseFloat(
-        newItems
-          .reduce((sum, item) => {
-            const itemTaxAmount = (item.price * item.quantity * item.tax) / 100;
-            return sum + itemTaxAmount;
-          }, 0)
-          .toFixed(2)
+      const { subtotal, taxTotal, total } = computeBillTotals(
+        newItems,
+        state.currentBill.discount
       );
-      const total = parseFloat((subtotal + taxTotal - state.currentBill.discount).toFixed(2));
 
       return {
         ...state,
@@ -257,22 +313,63 @@ export const usePOSStore = create<POSStore>((set, get) => ({
       if (itemIndex === -1) return state;
 
       const item = newItems[itemIndex];
+      const product = state.products.find((p) => p.id === item.productId);
+      const availableStock = toNumber(product?.stock, item.quantity);
+      const safeQuantity = Math.max(1, Math.min(quantity, availableStock));
+      const computed = computeItemTotals({
+        ...item,
+        quantity: safeQuantity,
+      });
       newItems[itemIndex] = {
         ...item,
-        quantity,
-        total: parseFloat((item.price * quantity).toFixed(2)),
+        quantity: safeQuantity,
+        discountRate: computed.discountRate,
+        discount: computed.discountAmount,
+        total: computed.total,
       };
 
-      const subtotal = parseFloat(newItems.reduce((sum, billItem) => sum + billItem.total, 0).toFixed(2));
-      const taxTotal = parseFloat(
-        newItems
-          .reduce((sum, billItem) => {
-            const itemTaxAmount = (billItem.price * billItem.quantity * billItem.tax) / 100;
-            return sum + itemTaxAmount;
-          }, 0)
-          .toFixed(2)
+      const { subtotal, taxTotal, total } = computeBillTotals(
+        newItems,
+        state.currentBill.discount
       );
-      const total = parseFloat((subtotal + taxTotal - state.currentBill.discount).toFixed(2));
+
+      return {
+        ...state,
+        currentBill: {
+          ...state.currentBill,
+          items: newItems,
+          subtotal,
+          taxTotal,
+          total,
+        },
+      };
+    });
+  },
+
+  updateItemDiscount: (itemId: string, discountRate: number) => {
+    set((state) => {
+      const newItems = [...state.currentBill.items];
+      const itemIndex = newItems.findIndex((item) => item.id === itemId);
+      if (itemIndex === -1) return state;
+
+      const item = newItems[itemIndex];
+      const safeDiscount = Math.max(0, Math.min(100, toNumber(discountRate, 0)));
+      const computed = computeItemTotals({
+        ...item,
+        discountRate: safeDiscount,
+      });
+
+      newItems[itemIndex] = {
+        ...item,
+        discountRate: safeDiscount,
+        discount: computed.discountAmount,
+        total: computed.total,
+      };
+
+      const { subtotal, taxTotal, total } = computeBillTotals(
+        newItems,
+        state.currentBill.discount
+      );
 
       return {
         ...state,

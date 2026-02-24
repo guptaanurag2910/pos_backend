@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -24,6 +26,8 @@ from accounts.permissions import IsAdminUser, IsManagerUser
 from accounts.models import AuditLog
 from accounts.utils import get_client_ip
 
+logger = logging.getLogger('inventory')
+
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
@@ -41,6 +45,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         category = serializer.save()
+        logger.info(f"category_create_completed actor_id={self.request.user.id} category_id={category.id}")
         AuditLog.objects.create(
             user=self.request.user,
             action='create',
@@ -52,6 +57,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
     
     def perform_update(self, serializer):
         category = serializer.save()
+        logger.info(f"category_update_completed actor_id={self.request.user.id} category_id={category.id}")
         AuditLog.objects.create(
             user=self.request.user,
             action='update',
@@ -62,6 +68,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
         )
     
     def perform_destroy(self, instance):
+        logger.info(f"category_delete_requested actor_id={self.request.user.id} category_id={instance.id}")
         AuditLog.objects.create(
             user=self.request.user,
             action='delete',
@@ -81,9 +88,27 @@ class ProductViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'barcode', 'description', 'hsn_code']
 
     def get_queryset(self):
-        return Product.objects.annotate(
-            current_stock=Sum('stock_levels__quantity')
-        )
+        queryset = Product.objects.all()
+        user = self.request.user
+
+        store_id = None
+        if user.role == 'admin':
+            # Admin can optionally scope by store query parameter.
+            store_id = self.request.query_params.get('store')
+        else:
+            store_id = getattr(user, 'store_id', None)
+
+        if store_id:
+            queryset = queryset.annotate(
+                current_stock=Sum(
+                    'stock_levels__quantity',
+                    filter=models.Q(stock_levels__store_id=store_id)
+                )
+            )
+        else:
+            queryset = queryset.annotate(current_stock=Sum('stock_levels__quantity'))
+
+        return queryset
     
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
@@ -109,6 +134,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def adjust_stock(self, request, pk=None):
         product = self.get_object()
+        logger.info(f"adjust_stock_requested actor_id={request.user.id} product_id={product.id}")
         
         # Validate input
         store_id = request.data.get('store')
@@ -171,6 +197,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                     'new_level': str(stock_level.quantity)
                 }
             )
+        logger.info(f"adjust_stock_completed actor_id={request.user.id} product_id={product.id} store_id={store_id} quantity={quantity}")
             
         serializer = StockRecordSerializer(record)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -180,6 +207,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         adjustments = request.data.get('adjustments', [])
         default_store_id = request.data.get('store')
         reason = request.data.get('reason', 'Bulk stock adjustment')
+        logger.info(f"bulk_adjust_stock_requested actor_id={request.user.id} adjustment_count={len(adjustments)} default_store_id={default_store_id}")
 
         if not isinstance(adjustments, list) or not adjustments:
             return Response(
@@ -262,6 +290,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         product = serializer.save()
+        logger.info(f"product_create_completed actor_id={self.request.user.id} product_id={product.id}")
         AuditLog.objects.create(
             user=self.request.user,
             action='create',
@@ -273,6 +302,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     
     def perform_update(self, serializer):
         product = serializer.save()
+        logger.info(f"product_update_completed actor_id={self.request.user.id} product_id={product.id}")
         AuditLog.objects.create(
             user=self.request.user,
             action='update',
@@ -283,6 +313,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         )
     
     def perform_destroy(self, instance):
+        logger.info(f"product_soft_delete_requested actor_id={self.request.user.id} product_id={instance.id}")
         AuditLog.objects.create(
             user=self.request.user,
             action='delete',
@@ -340,6 +371,7 @@ class StockLevelViewSet(viewsets.ReadOnlyModelViewSet):
         items = request.data.get('items', [])
         reason = request.data.get('reason', 'Stock reconciliation')
         apply_changes = bool(request.data.get('apply', True))
+        logger.info(f"stock_reconcile_requested actor_id={request.user.id} store_id={store_id} items={len(items)} apply={apply_changes}")
 
         if not store_id:
             return Response({"detail": "store is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -430,6 +462,7 @@ class StockTransferViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
         transfer = self.get_object()
+        logger.info(f"transfer_approve_requested actor_id={request.user.id} transfer_id={transfer.id}")
 
         if transfer.status != 'pending':
             return Response(
@@ -455,6 +488,7 @@ class StockTransferViewSet(viewsets.ModelViewSet):
             ip_address=get_client_ip(request),
             details={'action': 'approve'}
         )
+        logger.info(f"transfer_approve_completed actor_id={request.user.id} transfer_id={transfer.id}")
 
         return Response(self.get_serializer(transfer).data)
     
@@ -462,6 +496,7 @@ class StockTransferViewSet(viewsets.ModelViewSet):
     def update_status(self, request, pk=None):
         transfer = self.get_object()
         new_status = request.data.get('status')
+        logger.info(f"transfer_status_requested actor_id={request.user.id} transfer_id={transfer.id} new_status={new_status}")
         
         if not new_status or new_status not in dict(StockTransfer.STATUS_CHOICES).keys():
             return Response(
@@ -585,6 +620,7 @@ class StockTransferViewSet(viewsets.ModelViewSet):
                     'new_status': new_status
                 }
             )
+        logger.info(f"transfer_status_completed actor_id={request.user.id} transfer_id={transfer.id} old_status={old_status} new_status={new_status}")
         
         serializer = self.get_serializer(transfer)
         return Response(serializer.data)
@@ -592,6 +628,7 @@ class StockTransferViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         with transaction.atomic():
             transfer = serializer.save(created_by=self.request.user)
+            logger.info(f"transfer_create_completed actor_id={self.request.user.id} transfer_id={transfer.id}")
             
             # Log the action
             AuditLog.objects.create(
@@ -642,6 +679,7 @@ class InventoryUploadViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsManagerUser]
 
     def create(self, request, *args, **kwargs):
+        logger.info(f"inventory_upload_requested actor_id={request.user.id} filename={request.data.get('file')}")
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         upload = serializer.save()
@@ -652,6 +690,7 @@ class InventoryUploadViewSet(viewsets.ModelViewSet):
             mode = 'set'
 
         if not process_now:
+            logger.info(f"inventory_upload_saved_only actor_id={request.user.id} upload_id={upload.id}")
             return Response(
                 {'upload': InventoryUploadSerializer(upload).data, 'detail': 'File uploaded successfully'},
                 status=status.HTTP_201_CREATED
@@ -743,6 +782,7 @@ class InventoryUploadViewSet(viewsets.ModelViewSet):
                 failed += 1
                 errors.append({'line': idx, 'error': str(e), 'row': row})
 
+        logger.info(f"inventory_upload_processed actor_id={request.user.id} upload_id={upload.id} processed={processed} failed={failed} mode={mode}")
         return Response({
             'upload': InventoryUploadSerializer(upload).data,
             'mode': mode,

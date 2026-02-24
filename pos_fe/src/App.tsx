@@ -13,9 +13,11 @@ import CustomersPage from './pages/CustomersPage';
 import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 import UsersPage from './pages/UsersPage';
+import InitialDataUploadPage from './pages/InitialDataUploadPage';
 import Layout from './components/layout/Layout';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import AdminRoute from './components/auth/AdminRoute';
+import RoleRoute from './components/auth/RoleRoute';
 import { Toaster } from 'react-hot-toast';
 
 
@@ -27,9 +29,10 @@ import SupplierInvoicesPage from './pages/purchase/SupplierInvoicesPage';
 import SupplierPaymentsPage from './pages/purchase/SupplierPaymentsPage';
 
 function App() {
-  const { isAuthenticated, loadUserFromToken, settings } = useAuthStore();
+  const { isAuthenticated, loadUserFromToken, settings, user } = useAuthStore();
   const { loadProducts } = usePOSStore();
   const isDarkMode = settings.general.theme === 'dark';
+  const homePath = user?.role === 'cashier' ? '/billing' : '/dashboard';
 
   useEffect(() => {
     loadUserFromToken();
@@ -59,30 +62,150 @@ function App() {
               </ProtectedRoute>
             }
           >
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="dashboard" element={<DashboardPage />} />
-            <Route path="billing" element={<BillingPage />} />
-            <Route path="returns" element={<ReturnsPage />} />
-            <Route path="inventory" element={<InventoryPage />} />
+            <Route index element={<Navigate to={homePath} replace />} />
+            <Route
+              path="dashboard"
+              element={
+                <RoleRoute allowedRoles={['admin', 'manager']}>
+                  <DashboardPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="billing"
+              element={
+                <RoleRoute allowedRoles={['admin', 'manager', 'cashier']}>
+                  <BillingPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="returns"
+              element={
+                <RoleRoute allowedRoles={['admin', 'manager', 'cashier']}>
+                  <ReturnsPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="inventory"
+              element={
+                <RoleRoute allowedRoles={['admin', 'manager']}>
+                  <InventoryPage />
+                </RoleRoute>
+              }
+            />
 
              {/* Purchase Management Routes */}
-            <Route path="purchase/requisitions" element={<PurchaseRequisitionsPage />} />
-            <Route path="purchase/orders" element={<PurchaseOrdersPage />} />
-            <Route path="purchase/grn" element={<GoodsReceiptPage />} />
-            <Route path="purchase/invoices" element={<SupplierInvoicesPage />} />
-            <Route path="purchase/payments" element={<SupplierPaymentsPage />} />
+            <Route
+              path="purchase/requisitions"
+              element={
+                <RoleRoute allowedRoles={['admin', 'manager']}>
+                  <PurchaseRequisitionsPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="purchase/orders"
+              element={
+                <RoleRoute allowedRoles={['admin', 'manager']}>
+                  <PurchaseOrdersPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="purchase/grn"
+              element={
+                <RoleRoute allowedRoles={['admin', 'manager']}>
+                  <GoodsReceiptPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="purchase/invoices"
+              element={
+                <RoleRoute allowedRoles={['admin', 'manager']}>
+                  <SupplierInvoicesPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="purchase/payments"
+              element={
+                <RoleRoute allowedRoles={['admin', 'manager']}>
+                  <SupplierPaymentsPage />
+                </RoleRoute>
+              }
+            />
 
 
             {/* Legacy purchase invoice route - keeping for backward compatibility */}
 
-            <Route path="purchase-orders/:poId" element={<PurchaseOrderPage />} />
-            <Route path="purchase-orders" element={<PurchaseOrderPage />} />
-            <Route path="grns/:grnId" element={<GRNPage />} />
-            <Route path="grns" element={<GRNPage />} />
+            <Route
+              path="purchase-orders/:poId"
+              element={
+                <RoleRoute allowedRoles={['admin', 'manager']}>
+                  <PurchaseOrderPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="purchase-orders"
+              element={
+                <RoleRoute allowedRoles={['admin', 'manager']}>
+                  <PurchaseOrderPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="grns/:grnId"
+              element={
+                <RoleRoute allowedRoles={['admin', 'manager']}>
+                  <GRNPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="grns"
+              element={
+                <RoleRoute allowedRoles={['admin', 'manager']}>
+                  <GRNPage />
+                </RoleRoute>
+              }
+            />
 
-            <Route path="customers" element={<CustomersPage />} />
-            <Route path="reports" element={<ReportsPage />} />
-            <Route path="settings" element={<SettingsPage />} />
+            <Route
+              path="customers"
+              element={
+                <RoleRoute allowedRoles={['admin', 'manager']}>
+                  <CustomersPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="reports"
+              element={
+                <RoleRoute allowedRoles={['admin', 'manager']}>
+                  <ReportsPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="settings"
+              element={
+                <RoleRoute allowedRoles={['admin']}>
+                  <SettingsPage />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="initial-upload"
+              element={
+                <RoleRoute allowedRoles={['admin']}>
+                  <InitialDataUploadPage />
+                </RoleRoute>
+              }
+            />
             <Route
               path="users"
               element={

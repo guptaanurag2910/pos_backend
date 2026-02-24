@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   TrendingUp, 
   ShoppingBag, 
@@ -90,8 +91,9 @@ const DashboardCard = ({
 };
 
 const DashboardPage = () => {
+  const navigate = useNavigate();
   const { dashboardData, isLoading, loadDashboardData, selectedTimeRange, setTimeRange } = useDashboardStore();
-  const { settings } = useAuthStore();
+  const { settings, user } = useAuthStore();
   const isDarkMode = settings.general.theme === 'dark';
   const [selectedDashboard, setSelectedDashboard] = useState('overview');
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -379,6 +381,8 @@ const DashboardPage = () => {
     { label: 'Profit Margin', value: Math.max(0, Math.min(100, Number(performance.profitMargin || 0))), color: 'bg-purple-500' },
     { label: 'Efficiency Score', value: Math.max(0, Math.min(100, Number(performance.efficiencyScore || 0))), color: 'bg-orange-500' },
   ];
+  const totalInventoryItems = Number(dashboardData.inventorySummary?.totalItems || 0);
+  const showInitialUploadBanner = user?.role === 'admin' && totalInventoryItems === 0;
 
   const renderOverviewDashboard = () => (
     <div ref={dashboardContentRef} data-dashboard-capture="true" data-active-tab={selectedDashboard} className="space-y-6">
@@ -1021,6 +1025,25 @@ const DashboardPage = () => {
           </div>
         </div>
       </div>
+
+      {showInitialUploadBanner && (
+        <div className="rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+              Complete Initial Data Upload
+            </p>
+            <p className="text-sm text-amber-700 dark:text-amber-300">
+              No products found for this store. Upload the bootstrap Excel to start billing.
+            </p>
+          </div>
+          <button
+            onClick={() => navigate('/initial-upload')}
+            className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
+          >
+            Go to Initial Upload
+          </button>
+        </div>
+      )}
 
       {/* Dashboard Tabs */}
       <div className="border-b border-gray-200 dark:border-gray-700">

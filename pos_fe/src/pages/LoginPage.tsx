@@ -1,13 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Wallet, Mail, Lock, AlertCircle, Building2, UploadCloud, User } from 'lucide-react';
+import { Wallet, Mail, Lock, AlertCircle, Building2, User } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
-import { bootstrapStoreImport, createStore } from '../service/storeService';
-import { patchUser } from '../service/authService';
 
 const LoginPage = () => {
   const navigate = useNavigate();
-  const { login, register, loadUserFromToken, isAuthenticated, settings } = useAuthStore();
+  const { login, registerWithStore, loadUserFromToken, isAuthenticated, settings } = useAuthStore();
 
   const [flow, setFlow] = useState<'existing' | 'new'>('existing');
 
@@ -28,8 +26,6 @@ const LoginPage = () => {
   const [storePincode, setStorePincode] = useState('');
   const [storePhone, setStorePhone] = useState('');
   const [storeEmail, setStoreEmail] = useState('');
-  const [strictImport, setStrictImport] = useState(true);
-  const [importFile, setImportFile] = useState<File | null>(null);
   const [setupError, setSetupError] = useState('');
   const [isSetupInProgress, setIsSetupInProgress] = useState(false);
 
@@ -84,43 +80,33 @@ const LoginPage = () => {
       setSetupError('Please fill all mandatory store fields');
       return;
     }
-    if (!importFile) {
-      setSetupError('Please upload the setup Excel file');
-      return;
-    }
-
     setIsSetupInProgress(true);
     setIsLoading(true);
 
     try {
-      const registered = await register(ownerName, ownerEmail, ownerPassword);
-      if (!registered) {
+      const registered = await registerWithStore({
+        name: ownerName,
+        email: ownerEmail,
+        password: ownerPassword,
+        store: {
+          name: storeName,
+          code: storeCode,
+          address: storeAddress,
+          city: storeCity,
+          state: storeState,
+          pincode: storePincode,
+          phone: storePhone,
+          email: storeEmail || ownerEmail || null,
+          is_active: true,
+        },
+      });
+      if (!registered.ok || !registered.storeId) {
         setSetupError('Unable to register user. Try a different email.');
         return;
       }
+
       await loadUserFromToken();
-
-      const newStore = await createStore({
-        name: storeName,
-        code: storeCode,
-        address: storeAddress,
-        city: storeCity,
-        state: storeState,
-        pincode: storePincode,
-        phone: storePhone,
-        email: storeEmail || null,
-        is_main: true,
-        is_active: true,
-      });
-
-      const currentUserId = Number(useAuthStore.getState().user?.id || 0);
-      if (currentUserId > 0) {
-        await patchUser(currentUserId, { store: newStore.id, role: 'admin' });
-      }
-
-      await bootstrapStoreImport(newStore.id, importFile, strictImport);
-      await loadUserFromToken();
-      navigate('/dashboard');
+      navigate('/initial-upload');
     } catch (err: any) {
       console.error(err);
       setSetupError(err?.response?.data?.detail || 'Initial setup failed. Please verify store data and file format.');
@@ -351,40 +337,6 @@ const LoginPage = () => {
                   />
                 </div>
 
-                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide pt-2">Initial Data Upload</h3>
-                <div className="space-y-2">
-                  <div className="flex flex-wrap gap-2">
-                    <a
-                      href="/bootstrap/store_bootstrap_designed_template.xlsx"
-                      download
-                      className="inline-flex items-center px-3 py-2 text-sm border border-primary-300 text-primary-700 dark:text-primary-300 dark:border-primary-500 rounded-lg hover:bg-primary-50 dark:hover:bg-primary-900/30"
-                    >
-                      Download Designed Template
-                    </a>
-                    <a
-                      href="/bootstrap/store_bootstrap_sample.xlsx"
-                      download
-                      className="inline-flex items-center px-3 py-2 text-sm border border-gray-300 text-gray-700 dark:text-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
-                    >
-                      Download Sample File
-                    </a>
-                  </div>
-                  <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                    <UploadCloud size={16} />
-                    Upload setup Excel file (.xlsx)
-                  </label>
-                  <input
-                    type="file"
-                    accept=".xlsx,.xls"
-                    onChange={(e) => setImportFile(e.target.files?.[0] || null)}
-                    className="block w-full text-sm text-gray-700 dark:text-gray-200"
-                  />
-                  <label className="inline-flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                    <input type="checkbox" checked={strictImport} onChange={(e) => setStrictImport(e.target.checked)} />
-                    Strict import mode (stop on invalid rows)
-                  </label>
-                </div>
-
                 <button
                   type="submit"
                   disabled={isLoading}
@@ -392,7 +344,7 @@ const LoginPage = () => {
                     isLoading ? 'opacity-70 cursor-not-allowed' : ''
                   }`}
                 >
-                  {isLoading ? 'Setting up store...' : 'Create Store and Import Data'}
+                  {isLoading ? 'Setting up store...' : 'Create Store and Continue'}
                 </button>
               </form>
             </>

@@ -28,8 +28,8 @@ const InventoryPage = () => {
     try {
       const prodResponse = await listProducts({ search: searchQuery, category: categoryFilter });
       const catResponse = await listCategories();
-      setProducts(prodResponse.results);
-      setCategories(catResponse.results);
+      setProducts(Array.isArray(prodResponse?.results) ? prodResponse.results : []);
+      setCategories(Array.isArray(catResponse?.results) ? catResponse.results : []);
     } catch (error) {
       console.error('Error fetching inventory data:', error);
     }

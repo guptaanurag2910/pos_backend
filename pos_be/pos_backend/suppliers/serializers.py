@@ -129,11 +129,12 @@ class GoodsReceiptNoteSerializer(serializers.ModelSerializer):
             'id', 'grn_number', 'purchase_order', 'po_number', 'supplier', 'supplier_name',
             'store', 'store_name', 'receipt_date', 'invoice_number', 'invoice_date',
             'status', 'subtotal', 'discount_total', 'tax_total', 'shipping_charges', 'total', 'notes',
+            'is_active',
             'created_by', 'created_by_name', 'created_at', 'updated_at',
             'items_count', 'received_items', 'discrepancies'
         )
         read_only_fields = ('id', 'grn_number', 'store', 'created_by', 'created_at', 'updated_at',
-                           'subtotal', 'discount_total', 'tax_total', 'total',
+            'subtotal', 'discount_total', 'tax_total', 'total', 'is_active',
                             'items_count', 'received_items', 'discrepancies')
 
     def get_items_count(self, obj):
@@ -186,7 +187,7 @@ class SupplierInvoiceSerializer(serializers.ModelSerializer):
             'po_number', 'purchase_order', 'po_number_resolved', 'grn_number', 'grn', 'grn_number_resolved',
             'store', 'invoice_date', 'due_date', 'status', 'payment_terms',
             'subtotal', 'discount_total', 'tax_total', 'shipping_charges', 'grand_total',
-            'amount_paid', 'due_amount', 'notes', 'created_by', 'created_at', 'updated_at', 'items'
+            'amount_paid', 'due_amount', 'notes', 'is_active', 'created_by', 'created_at', 'updated_at', 'items'
         )
         read_only_fields = ('id', 'created_by', 'created_at', 'updated_at', 'amount_paid')
         extra_kwargs = {
@@ -223,6 +224,6 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
             'id', 'supplier', 'supplier_name', 'purchase_order', 'po_number',
             'supplier_invoice', 'supplier_invoice_number',
             'amount', 'payment_method', 'reference_number', 'payment_date',
-            'status', 'notes', 'created_by', 'created_by_name', 'created_at', 'updated_at'
+            'status', 'notes', 'is_active', 'created_by', 'created_by_name', 'created_at', 'updated_at'
         )
         read_only_fields = ('id', 'created_by', 'created_at', 'updated_at')

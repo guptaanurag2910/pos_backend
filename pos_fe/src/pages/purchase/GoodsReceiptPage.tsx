@@ -9,8 +9,11 @@ import {
   Eye,
   Edit,
   Package,
+  Trash,
 } from 'lucide-react';
-import { listGRNs } from '../../service/purchaseService';
+import { deleteGRN, listGRNs } from '../../service/purchaseService';
+import toast from 'react-hot-toast';
+import ProcurementFlowStepper from '../../components/purchase/ProcurementFlowStepper';
 
 const GoodsReceiptPage = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -19,10 +22,30 @@ const GoodsReceiptPage = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    listGRNs()
-      .then((res) => setGrnRecords(res.results || []))
-      .catch(console.error);
+    loadGRNs();
   }, []);
+
+  const loadGRNs = async () => {
+    try {
+      const res = await listGRNs();
+      setGrnRecords(res.results || []);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleDeleteGRN = async (id: number) => {
+    const ok = window.confirm('Soft delete this GRN? You can still view it with include_inactive.');
+    if (!ok) return;
+    try {
+      await deleteGRN(id);
+      toast.success('GRN deleted');
+      await loadGRNs();
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error?.response?.data?.detail || 'Failed to delete GRN');
+    }
+  };
 
   const filteredRecords = grnRecords.filter((grn) => {
     const matchesSearch =
@@ -64,6 +87,16 @@ const GoodsReceiptPage = () => {
 
   return (
     <div className="space-y-6">
+      <ProcurementFlowStepper
+        currentStep={2}
+        steps={{
+          po: { done: false, optional: true },
+          grn: { done: true, optional: true },
+          pi: { done: false },
+          payment: { done: false },
+        }}
+      />
+
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Goods Receipt Notes</h1>
@@ -153,7 +186,7 @@ const GoodsReceiptPage = () => {
                         {grn.grn_number}
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {new Date(grn.grn_date).toLocaleDateString('en-GB')}
+                        {grn.receipt_date ? new Date(grn.receipt_date).toLocaleDateString('en-GB') : '-'}
                       </div>
                     </td>
                     <td className="px-6 py-4">{grn.po_number || '-'}</td>
@@ -190,6 +223,12 @@ const GoodsReceiptPage = () => {
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end space-x-2">
                         <button
+                          onClick={() => navigate(`/purchase/invoices?grn=${grn.id}&po=${grn.purchase_order || ''}`)}
+                          className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700"
+                        >
+                          Create SI
+                        </button>
+                        <button
                           onClick={() => navigate(`/grns/${grn.id}`)}
                           className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300"
                         >
@@ -200,6 +239,12 @@ const GoodsReceiptPage = () => {
                           className="text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
                         >
                           <Edit size={16} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteGRN(Number(grn.id))}
+                          className="text-red-600 hover:text-red-800"
+                        >
+                          <Trash size={16} />
                         </button>
                       </div>
                     </td>

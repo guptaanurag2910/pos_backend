@@ -8,8 +8,10 @@ import {
   getPurchaseOrder,
 } from '../../service/purchaseService';
 import { useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import toast, { Toaster } from 'react-hot-toast';
 import GRNItemsEditor from './GRNItemsEditor';
+import ProcurementFlowStepper from '../purchase/ProcurementFlowStepper';
 
 interface Props {
   grnId?: number;
@@ -31,6 +33,8 @@ const GRNFormPage = ({ grnId }: Props) => {
 
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
+  const [searchParams] = useSearchParams();
+  const directReceiptMode = String(searchParams.get('mode') || '').toLowerCase() === 'direct_receipt';
   const navigate = useNavigate();
 
   const [summary, setSummary] = useState({
@@ -41,31 +45,50 @@ const GRNFormPage = ({ grnId }: Props) => {
   });
 
   useEffect(() => {
-    if (grnId) {
-      getGRN(grnId).then(async (res) => {
-        let poItems = [];
-        if (res.purchase_order) {
-          const po = await getPurchaseOrder(res.purchase_order);
-          poItems = po.items || [];
-          res.terms = po.terms || '';
+    const init = async () => {
+      try {
+        const [supplierList, poRes] = await Promise.all([
+          listSuppliers(),
+          listPurchaseOrders({ page_size: 500 }),
+        ]);
+        setSuppliers(supplierList);
+        const poList = Array.isArray(poRes?.results) ? poRes.results : [];
+        setPurchaseOrders(poList);
+
+        if (grnId) {
+          const res = await getGRN(grnId);
+          let poItems = [];
+          if (res.purchase_order) {
+            const po = await getPurchaseOrder(res.purchase_order);
+            poItems = po.items || [];
+            res.terms = po.terms || '';
+          }
+
+          const normalizedItems = (res.items || []).map((item: any) => {
+            const poMatch = poItems.find((poItem: any) => poItem.product === item.product) || {};
+            return {
+              ...item,
+              quantity_ordered: parseFloat(poMatch.quantity_ordered) || 0,
+              received_quantity: parseFloat(item.quantity) || 0,
+            };
+          });
+
+          setForm({ ...res, po_items: poItems, items: normalizedItems });
+          return;
         }
 
-        const normalizedItems = (res.items || []).map((item: any) => {
-          const poMatch = poItems.find((poItem: any) => poItem.product === item.product) || {};
-          return {
-            ...item,
-            quantity_ordered: parseFloat(poMatch.quantity_ordered) || 0,
-            received_quantity: parseFloat(item.quantity) || 0,
-          };
-        });
+        const poFromQuery = Number(searchParams.get('po'));
+        if (Number.isInteger(poFromQuery) && poFromQuery > 0) {
+          await handlePurchaseOrderSelect(poFromQuery);
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    };
 
-        setForm({ ...res, po_items: poItems, items: normalizedItems });
-      }).catch(console.error);
-    }
-
-    listSuppliers().then(setSuppliers).catch(console.error);
-    listPurchaseOrders().then((res) => setPurchaseOrders(res.results)).catch(console.error);
-  }, [grnId]);
+    init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grnId, searchParams]);
 
   useEffect(() => {
     let subtotal = 0;
@@ -98,15 +121,23 @@ const GRNFormPage = ({ grnId }: Props) => {
   };
 
   const handleSave = async () => {
-    if (!form.supplier || !form.purchase_order) {
-      toast.error('Please select both Supplier and Purchase Order');
+    if (!form.supplier) {
+      toast.error('Please select supplier');
+      return;
+    }
+    if (!form.purchase_order && !String(form.notes || '').trim()) {
+      toast.error('No-PO GRN requires reason in notes');
       return;
     }
 
     try {
       const payload = {
         ...form,
+        purchase_order: form.purchase_order || null,
         items: form.items.map(({ product_name, ...item }: any) => item),
+        notes: !form.purchase_order
+          ? `${form.notes || ''}\n[Direct Receipt Exception] No PO flow`.trim()
+          : form.notes,
       };
 
       if (grnId) {
@@ -168,6 +199,24 @@ const GRNFormPage = ({ grnId }: Props) => {
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <Toaster position="top-right" />
+      <ProcurementFlowStepper
+        currentStep={2}
+        steps={{
+          po: { done: !!form.purchase_order, optional: true },
+          grn: { done: true, optional: true },
+          pi: { done: false },
+          payment: { done: false },
+        }}
+        contextIds={{
+          poId: form.purchase_order ? Number(form.purchase_order) : null,
+          grnId: grnId || (form.id ? Number(form.id) : null),
+        }}
+      />
+      {directReceiptMode && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
+          Direct Receipt flow active: GRN -&gt; PI -&gt; Payment (No PO). Add reason in notes before save.
+        </div>
+      )}
       <h1 className="text-3xl font-semibold">{grnId ? 'Edit' : 'New'} GRN</h1>
 
       <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6 space-y-6">

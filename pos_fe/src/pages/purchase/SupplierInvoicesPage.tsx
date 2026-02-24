@@ -8,8 +8,11 @@ import {
   Edit,
   IndianRupee,
   Upload,
+  Trash,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import ProcurementFlowStepper from '../../components/purchase/ProcurementFlowStepper';
 import SupplierInvoiceModal from '../../components/purchase/modals/SupplierInvoiceModal';
 import {
   createSupplierInvoice,
@@ -17,6 +20,7 @@ import {
   listGRNs,
   listSupplierInvoices,
   listSuppliers,
+  deleteSupplierInvoice,
   updateSupplierInvoice,
 } from '../../service/purchaseService';
 
@@ -78,6 +82,8 @@ const normalizeInvoice = (invoice: any) => {
 };
 
 const SupplierInvoicesPage = () => {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
@@ -87,6 +93,10 @@ const SupplierInvoicesPage = () => {
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [entryMode, setEntryMode] = useState<'standard' | 'direct_receipt' | 'direct_invoice'>('standard');
+  const queryPoId = Number(searchParams.get('po'));
+  const queryGrnId = Number(searchParams.get('grn'));
+  const queryEditInvoiceId = Number(searchParams.get('edit'));
 
   const loadInvoices = async () => {
     setIsLoading(true);
@@ -109,6 +119,89 @@ const SupplierInvoicesPage = () => {
     loadInvoices();
   }, []);
 
+  useEffect(() => {
+    const bootstrapFromQuery = async () => {
+      const editId = Number(searchParams.get('edit'));
+      const grnId = Number(searchParams.get('grn'));
+      const poId = Number(searchParams.get('po'));
+      const mode = String(searchParams.get('mode') || '').toLowerCase();
+      if (mode === 'direct_invoice') {
+        setEntryMode('direct_invoice');
+      } else if (mode === 'direct_receipt') {
+        setEntryMode('direct_receipt');
+      } else {
+        setEntryMode('standard');
+      }
+      if (Number.isInteger(editId) && editId > 0) {
+        return;
+      }
+
+      if (!(Number.isInteger(grnId) && grnId > 0) && !(Number.isInteger(poId) && poId > 0)) {
+        return;
+      }
+
+      try {
+        let resolvedGRN: any = null;
+
+        if (Number.isInteger(grnId) && grnId > 0) {
+          resolvedGRN = await getGRN(grnId);
+        } else if (Number.isInteger(poId) && poId > 0) {
+          const grnResponse = await listGRNs({ purchase_order: poId, page_size: 1, ordering: '-created_at' });
+          const latestGRN = extractList(grnResponse)[0];
+          if (latestGRN?.id) {
+            resolvedGRN = await getGRN(Number(latestGRN.id));
+          }
+        }
+
+        if (resolvedGRN) {
+          setSelectedGRN({
+            grnNumber: resolvedGRN.grn_number || '',
+            poNumber: resolvedGRN.po_number || '',
+            supplierName: resolvedGRN.supplier_name || '',
+            purchaseOrderId: resolvedGRN.purchase_order || null,
+            grnId: resolvedGRN.id || null,
+            items: Array.isArray(resolvedGRN.items)
+              ? resolvedGRN.items.map((item: any) => ({
+                  productId: String(item.product || ''),
+                  productName: item.product_name || '',
+                  acceptedQuantity: toNumber(item.quantity),
+                  unitPrice: toNumber(item.unit_price),
+                  taxRate: toNumber(item.tax_rate),
+                }))
+              : [],
+          });
+        } else if (Number.isInteger(poId) && poId > 0) {
+          setSelectedGRN({
+            grnNumber: '',
+            poNumber: '',
+            supplierName: '',
+            purchaseOrderId: poId,
+            grnId: null,
+            items: [],
+          });
+        }
+
+        setEditingInvoice(null);
+        setShowInvoiceModal(true);
+      } catch (error) {
+        console.error('Failed to initialize supplier invoice flow from query:', error);
+      }
+    };
+
+    bootstrapFromQuery();
+  }, [searchParams]);
+
+  useEffect(() => {
+    const editId = Number(searchParams.get('edit'));
+    if (!(Number.isInteger(editId) && editId > 0)) return;
+    if (showInvoiceModal) return;
+    const invoice = supplierInvoices.find((inv) => Number(inv.id) === editId);
+    if (!invoice) return;
+    setSelectedGRN(null);
+    setEditingInvoice(invoice);
+    setShowInvoiceModal(true);
+  }, [searchParams, supplierInvoices, showInvoiceModal]);
+
   const buildInvoicePayload = (invoiceData: any) => {
     const supplierName = invoiceData.supplierName?.trim();
     const matchedSupplier = suppliers.find(
@@ -117,11 +210,25 @@ const SupplierInvoicesPage = () => {
         supplier.name.toLowerCase() === String(supplierName || '').toLowerCase()
     );
 
+    const purchaseOrderId =
+      invoiceData.purchaseOrderId ||
+      selectedGRN?.purchaseOrderId ||
+      editingInvoice?.purchaseOrderId ||
+      null;
+    const grnId =
+      invoiceData.grnId || selectedGRN?.grnId || editingInvoice?.grnId || null;
+    const directExceptionNote =
+      !purchaseOrderId && !grnId
+        ? `\n[Direct Invoice Exception] No PO/GRN. Reason: ${invoiceData.notes || 'Not provided'}`
+        : '';
+
     return {
       invoice_number: invoiceData.invoiceNumber,
       supplier_invoice_number: invoiceData.supplierInvoiceNumber,
       supplier_name: supplierName,
       supplier: matchedSupplier?.id || editingInvoice?.supplierId || null,
+      purchase_order: purchaseOrderId,
+      grn: grnId,
       po_number: invoiceData.poNumber || null,
       grn_number: invoiceData.grnNumber || null,
       invoice_date: invoiceData.invoiceDate,
@@ -133,7 +240,7 @@ const SupplierInvoicesPage = () => {
       tax_total: toNumber(invoiceData.taxTotal),
       shipping_charges: toNumber(invoiceData.shippingCharges),
       grand_total: toNumber(invoiceData.grandTotal),
-      notes: invoiceData.notes || '',
+      notes: `${invoiceData.notes || ''}${directExceptionNote}`.trim(),
       items: (invoiceData.items || []).map((item: any) => {
         const productIdAsNumber = Number(item.productId);
         const isNumericProductRef = Number.isInteger(productIdAsNumber) && productIdAsNumber > 0;
@@ -165,6 +272,10 @@ const SupplierInvoicesPage = () => {
     setIsSaving(true);
     try {
       const payload = buildInvoicePayload(invoiceData);
+      if (!payload.purchase_order && !payload.grn && !String(invoiceData.notes || '').trim()) {
+        toast.error('Direct Invoice requires a reason in notes (No PO/No GRN justification).');
+        return false;
+      }
       if (editingInvoice?.id) {
         await updateSupplierInvoice(editingInvoice.id, payload);
         toast.success('Supplier invoice updated');
@@ -190,6 +301,19 @@ const SupplierInvoicesPage = () => {
   const handleEditInvoice = (invoice: any) => {
     setEditingInvoice(invoice);
     setShowInvoiceModal(true);
+  };
+
+  const handleDeleteInvoice = async (invoiceId: number) => {
+    const ok = window.confirm('Soft delete this Supplier Invoice?');
+    if (!ok) return;
+    try {
+      await deleteSupplierInvoice(invoiceId);
+      toast.success('Supplier invoice deleted');
+      await loadInvoices();
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error?.response?.data?.detail || 'Failed to delete supplier invoice');
+    }
   };
 
   const handleNewInvoiceFromGRN = async () => {
@@ -274,6 +398,37 @@ const SupplierInvoicesPage = () => {
 
   return (
     <div className="space-y-6">
+      <ProcurementFlowStepper
+        currentStep={3}
+        steps={{
+          po: { done: entryMode === 'standard', optional: true },
+          grn: { done: entryMode !== 'direct_invoice', optional: true },
+          pi: { done: true },
+          payment: { done: false },
+        }}
+        contextIds={{
+          poId:
+            selectedGRN?.purchaseOrderId ||
+            editingInvoice?.purchaseOrderId ||
+            (Number.isInteger(queryPoId) && queryPoId > 0 ? queryPoId : null),
+          grnId:
+            selectedGRN?.grnId ||
+            editingInvoice?.grnId ||
+            (Number.isInteger(queryGrnId) && queryGrnId > 0 ? queryGrnId : null),
+          invoiceId:
+            editingInvoice?.id ||
+            (Number.isInteger(queryEditInvoiceId) && queryEditInvoiceId > 0 ? queryEditInvoiceId : null),
+        }}
+      />
+
+      {(entryMode === 'direct_invoice' || entryMode === 'direct_receipt') && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
+          {entryMode === 'direct_invoice'
+            ? 'Direct Invoice flow active: PI -> Payment (No PO, No GRN). Reason/notes is mandatory.'
+            : 'Direct Receipt flow active: GRN -> PI -> Payment (No PO).'}
+        </div>
+      )}
+
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Supplier Invoices</h1>
@@ -423,12 +578,26 @@ const SupplierInvoicesPage = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button
-                        onClick={() => handleEditInvoice(invoice)}
-                        className="text-primary-600 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-300"
-                      >
-                        <Edit size={16} />
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => navigate(`/purchase/payments?invoice=${invoice.id}&po=${invoice.purchaseOrderId || ''}`)}
+                          className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700"
+                        >
+                          Record Payment
+                        </button>
+                        <button
+                          onClick={() => handleEditInvoice(invoice)}
+                          className="text-primary-600 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-300"
+                        >
+                          <Edit size={16} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteInvoice(Number(invoice.id))}
+                          className="text-red-600 hover:text-red-800"
+                        >
+                          <Trash size={16} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

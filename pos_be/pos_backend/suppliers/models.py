@@ -188,6 +188,7 @@ class GoodsReceiptNote(models.Model):
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     notes = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
 
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -310,6 +311,7 @@ class SupplierInvoice(models.Model):
     amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     notes = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True,
                                    related_name='created_supplier_invoices')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -332,6 +334,37 @@ class SupplierInvoice(models.Model):
     @property
     def due_amount(self):
         return max(self.grand_total - self.amount_paid, Decimal('0'))
+
+    def calculate_totals(self):
+        items = self.items.all()
+        if not items.exists():
+            self.subtotal = Decimal('0.00')
+            self.discount_total = Decimal('0.00')
+            self.tax_total = Decimal('0.00')
+            self.grand_total = Decimal(str(self.shipping_charges or 0))
+            return
+
+        subtotal = Decimal('0.00')
+        discount_total = Decimal('0.00')
+        tax_total = Decimal('0.00')
+        grand_total = Decimal('0.00')
+
+        for item in items:
+            line_subtotal = Decimal(str(item.quantity)) * Decimal(str(item.unit_price))
+            subtotal += line_subtotal
+            raw_discount = Decimal(str(item.discount or 0))
+            if item.discount_type == 'amount':
+                line_discount = min(raw_discount, line_subtotal)
+            else:
+                line_discount = (line_subtotal * (raw_discount / Decimal('100'))).quantize(Decimal('0.01'))
+            discount_total += line_discount
+            tax_total += Decimal(str(item.tax_amount))
+            grand_total += Decimal(str(item.total))
+
+        self.subtotal = subtotal.quantize(Decimal('0.01'))
+        self.discount_total = discount_total.quantize(Decimal('0.01'))
+        self.tax_total = tax_total.quantize(Decimal('0.01'))
+        self.grand_total = (grand_total + Decimal(str(self.shipping_charges or 0))).quantize(Decimal('0.01'))
 
 
 class SupplierInvoiceItem(models.Model):
@@ -363,6 +396,28 @@ class SupplierInvoiceItem(models.Model):
     def __str__(self):
         return self.product_name
 
+    def save(self, *args, **kwargs):
+        quantity = Decimal(str(self.quantity or 0))
+        unit_price = Decimal(str(self.unit_price or 0))
+        tax_rate = Decimal(str(self.tax_rate or 0))
+        discount = Decimal(str(self.discount or 0))
+
+        base = (quantity * unit_price).quantize(Decimal('0.01'))
+
+        if self.discount_type == 'amount':
+            discount_amount = min(discount, base)
+        else:
+            discount_amount = (base * (discount / Decimal('100'))).quantize(Decimal('0.01'))
+
+        taxable = max(base - discount_amount, Decimal('0.00'))
+        tax_amount = (taxable * (tax_rate / Decimal('100'))).quantize(Decimal('0.01'))
+        total = (taxable + tax_amount).quantize(Decimal('0.01'))
+
+        self.tax_amount = tax_amount
+        self.total = total
+
+        super().save(*args, **kwargs)
+
 
 class SupplierPayment(models.Model):
     PAYMENT_METHOD_CHOICES = (
@@ -393,6 +448,7 @@ class SupplierPayment(models.Model):
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     notes = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
 
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_now_add=True)

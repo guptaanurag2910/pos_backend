@@ -7,7 +7,13 @@ const INVENTORY_URL = '/api/inventory/';
 // ---------------------------
 export const listCategories = async () => {
   const res = await axiosInstance.get(`${INVENTORY_URL}categories/`);
-  return res.data;
+  if (Array.isArray(res.data)) {
+    return { results: res.data, count: res.data.length };
+  }
+  return {
+    ...res.data,
+    results: Array.isArray(res.data?.results) ? res.data.results : [],
+  };
 };
 
 export const getCategory = async (id: number) => {
@@ -44,7 +50,13 @@ export const listProducts = async (params: ProductFilterParams = {}) => {
   if (params.category) cleanParams.category = params.category;
 
   const res = await axiosInstance.get(`${INVENTORY_URL}products/`, { params: cleanParams });
-  return res.data;
+  if (Array.isArray(res.data)) {
+    return { results: res.data, count: res.data.length };
+  }
+  return {
+    ...res.data,
+    results: Array.isArray(res.data?.results) ? res.data.results : [],
+  };
 };
 
 export const getProduct = async (id: number) => {

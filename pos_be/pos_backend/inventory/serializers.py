@@ -77,7 +77,8 @@ class ProductSerializer(serializers.ModelSerializer):
             return None
 
         if request.user.role == 'admin':
-            return request.query_params.get('store')
+            # Default store-admin views to their own store unless an explicit store is requested.
+            return request.query_params.get('store') or getattr(request.user, 'store_id', None)
         return getattr(request.user, 'store_id', None)
 
     def get_stock_details(self, obj):

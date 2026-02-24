@@ -93,8 +93,9 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         store_id = None
         if user.role == 'admin':
-            # Admin can optionally scope by store query parameter.
-            store_id = self.request.query_params.get('store')
+            # Store-admin users should default to their own store.
+            # Global admin (no store) can still view all stores unless `store` is provided.
+            store_id = self.request.query_params.get('store') or getattr(user, 'store_id', None)
         else:
             store_id = getattr(user, 'store_id', None)
 

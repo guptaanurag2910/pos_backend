@@ -3,6 +3,7 @@ import { X, Search, RotateCcw, Package } from 'lucide-react';
 import { Bill } from '../../types';
 import { CreateReturnPayload, ReturnItemPayload } from '../../service/returnsService';
 import { listBills, getBill } from '../../service/salesService';
+import toast from 'react-hot-toast';
 
 interface ReturnItem {
   id: string;
@@ -20,10 +21,13 @@ interface ReturnItem {
 interface ReturnModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (payload: CreateReturnPayload) => void;
+  onSave: (payload: CreateReturnPayload) => Promise<void>;
+  selectedBill?: Bill | null;
+  completedBills?: Bill[];
+  onSelectBill?: (billId: string) => void;
 }
 
-const ReturnModal = ({ isOpen, onClose, onSave }: ReturnModalProps) => {
+const ReturnModal = ({ isOpen, onClose, onSave, selectedBill, completedBills }: ReturnModalProps) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [step, setStep] = useState<'select_bill' | 'process_return'>('select_bill');
   const [bills, setBills] = useState<Bill[]>([]);
@@ -44,10 +48,22 @@ const ReturnModal = ({ isOpen, onClose, onSave }: ReturnModalProps) => {
   const [message, setMessage] = useState('');
   const [showMessageModal, setShowMessageModal] = useState(false);
   const billSearchInputRef = useRef<HTMLInputElement>(null);
+  const returnQtyRefs = useRef<Array<HTMLInputElement | null>>([]);
 
   useEffect(() => {
-    if (isOpen && step === 'select_bill') fetchBills();
-  }, [isOpen, step]);
+    if (!isOpen) return;
+    if (selectedBill) {
+      void handleSelectBill(selectedBill);
+      return;
+    }
+    if (step === 'select_bill') {
+      if (completedBills && completedBills.length > 0) {
+        setBills(completedBills);
+      } else {
+        fetchBills();
+      }
+    }
+  }, [isOpen, step, selectedBill, completedBills]);
 
   useEffect(() => {
     if (isOpen && step === 'select_bill') {
@@ -80,7 +96,28 @@ const ReturnModal = ({ isOpen, onClose, onSave }: ReturnModalProps) => {
 
       if (isCtrlOrMeta && key === 'enter' && step === 'process_return') {
         event.preventDefault();
-        handleSave();
+        void handleSave();
+      }
+
+      if (step === 'process_return') {
+        if (event.key === 'ArrowDown') {
+          const activeIndex = returnQtyRefs.current.findIndex((el) => el === document.activeElement);
+          if (activeIndex >= 0) {
+            event.preventDefault();
+            const next = Math.min(activeIndex + 1, returnQtyRefs.current.length - 1);
+            returnQtyRefs.current[next]?.focus();
+            returnQtyRefs.current[next]?.select();
+          }
+        }
+        if (event.key === 'ArrowUp') {
+          const activeIndex = returnQtyRefs.current.findIndex((el) => el === document.activeElement);
+          if (activeIndex >= 0) {
+            event.preventDefault();
+            const prev = Math.max(activeIndex - 1, 0);
+            returnQtyRefs.current[prev]?.focus();
+            returnQtyRefs.current[prev]?.select();
+          }
+        }
       }
     };
 
@@ -153,7 +190,7 @@ const ReturnModal = ({ isOpen, onClose, onSave }: ReturnModalProps) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
   const returnItems: ReturnItemPayload[] = formData.items
     .filter((item) => item.returnQuantity > 0)
     .map((item) => ({
@@ -217,9 +254,18 @@ const ReturnModal = ({ isOpen, onClose, onSave }: ReturnModalProps) => {
   })),
 };
 
-  onSave(payload);
-  onClose();
-  resetForm();
+  try {
+    await onSave(payload);
+    onClose();
+    resetForm();
+    toast.success('Return saved successfully');
+  } catch (error: any) {
+    const message =
+      error?.response?.data?.detail ||
+      error?.message ||
+      'Failed to process return.';
+    toast.error(message);
+  }
 };
 
   const resetForm = () => {
@@ -300,6 +346,7 @@ const ReturnModal = ({ isOpen, onClose, onSave }: ReturnModalProps) => {
                   <input
                     ref={billSearchInputRef}
                     data-shortcut="return-bill-search"
+                    data-testid="returns-bill-search"
                     type="text"
                     placeholder="Search by bill number or customer name..."
                     value={searchQuery}
@@ -314,6 +361,7 @@ const ReturnModal = ({ isOpen, onClose, onSave }: ReturnModalProps) => {
                 {filteredBills.map(bill => (
                   <div
                     key={bill.id}
+                    data-testid="returns-bill-card"
                     onClick={() => handleSelectBill(bill)}
                     className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:border-primary-500 dark:hover:border-primary-400 cursor-pointer transition-colors"
                   >
@@ -335,9 +383,9 @@ const ReturnModal = ({ isOpen, onClose, onSave }: ReturnModalProps) => {
                       </p>
                       <div className="space-y-1">
                         {Array.isArray(bill.items)
-                          ? bill.items.slice(0, 2).map(item => (
+                          ? bill.items.slice(0, 2).map((item: any) => (
                               <div key={item.id} className="text-xs text-gray-500 dark:text-gray-400 flex justify-between">
-                                <span>{item.productName} x{item.quantity}</span>
+                                <span>{item.product_name || item.productName || 'Item'} x{item.quantity}</span>
                                 <span>₹{parseFloat(item.total || '0').toFixed(2)}</span>
                               </div>
                             ))
@@ -349,9 +397,9 @@ const ReturnModal = ({ isOpen, onClose, onSave }: ReturnModalProps) => {
                     </div>
 
                     <div className="space-y-1">
-                      {Array.isArray(bill.items) ? bill.items.slice(0, 2).map(item => (
+                      {Array.isArray(bill.items) ? bill.items.slice(0, 2).map((item: any) => (
                             <div key={item.id} className="text-xs text-gray-500 dark:text-gray-400 flex justify-between">
-                              <span>{item.productName} x{item.quantity}</span>
+                              <span>{item.product_name || item.productName || 'Item'} x{item.quantity}</span>
                               <span>₹{parseFloat(item.total || '0').toFixed(2)}</span>
                             </div>
                           )) : (
@@ -381,6 +429,9 @@ const ReturnModal = ({ isOpen, onClose, onSave }: ReturnModalProps) => {
             </div>
           ) : (
             <div>
+              <div className="mb-4 p-3 rounded bg-blue-50 dark:bg-blue-900/20 text-xs text-blue-700 dark:text-blue-300">
+                Keyboard: Arrow Up/Down to move return qty rows, Ctrl/Cmd + Enter to submit, Esc to close.
+              </div>
               {/* Return Header */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
 
@@ -485,14 +536,19 @@ const ReturnModal = ({ isOpen, onClose, onSave }: ReturnModalProps) => {
                             </div>
                           </td>
                           <td className="px-4 py-3 text-center">
-                            <span className="text-sm text-gray-900 dark:text-gray-100">{item.originalQuantity}</span>
+                              <span className="text-sm text-gray-900 dark:text-gray-100">{item.originalQuantity}</span>
                           </td>
                           <td className="px-4 py-3 text-center">
                             <input
+                              data-testid="returns-item-qty"
+                              ref={(el) => {
+                                returnQtyRefs.current[index] = el;
+                              }}
                               type="number"
                               min="0"
                               max={item.originalQuantity}
                               value={item.returnQuantity}
+                              onFocus={(e) => e.target.select()}
                               onChange={(e) => updateReturnItem(index, 'returnQuantity', parseInt(e.target.value) || 0)}
                               className="w-16 px-2 py-1 text-center border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded text-sm text-gray-900 dark:text-gray-100"
                             />
@@ -515,6 +571,7 @@ const ReturnModal = ({ isOpen, onClose, onSave }: ReturnModalProps) => {
                           </td>
                           <td className="px-4 py-3">
                             <input
+                              data-testid="returns-item-reason"
                               type="text"
                               value={item.reason}
                               onChange={(e) => updateReturnItem(index, 'reason', e.target.value)}
@@ -586,7 +643,8 @@ const ReturnModal = ({ isOpen, onClose, onSave }: ReturnModalProps) => {
                 Back
               </button>
               <button
-                onClick={handleSave}
+                data-testid="returns-process-submit"
+                onClick={() => void handleSave()}
                 className="px-4 py-2 bg-primary-600 dark:bg-primary-500 text-white rounded-lg font-medium hover:bg-primary-700 dark:hover:bg-primary-600"
               >
                 Process Return

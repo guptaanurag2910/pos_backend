@@ -4,11 +4,16 @@ import {
   getPurchaseOrder,
   updatePurchaseOrder,
   listSuppliers,
+  createSupplier,
+  listGRNs,
+  listSupplierInvoices,
+  listSupplierPayments,
 } from '../../service/purchaseService';
 import { listProducts } from '../../service/inventoryService';
 import { useNavigate } from 'react-router-dom';
 import toast, { Toaster } from 'react-hot-toast';
 import PurchaseOrderItemsEditor from './PurchaseOrderItemsEditor';
+import ProcurementFlowStepper from '../purchase/ProcurementFlowStepper';
 
 interface Props {
   poId?: number;
@@ -34,6 +39,24 @@ const PurchaseOrderFormPage = ({ poId }: Props) => {
 
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+  const [showNewSupplier, setShowNewSupplier] = useState(false);
+  const [newSupplier, setNewSupplier] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    contact_person: '',
+    city: '',
+    state: '',
+  });
+  const [workflow, setWorkflow] = useState({
+    po: false,
+    grn: false,
+    invoice: false,
+    payment: false,
+    grnId: null as number | null,
+    invoiceId: null as number | null,
+    paymentId: null as number | null,
+  });
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -55,6 +78,96 @@ const PurchaseOrderFormPage = ({ poId }: Props) => {
     listSuppliers().then(setSuppliers).catch(console.error);
     listProducts({}).then((res) => setProducts(res.results)).catch(console.error);
   }, [poId]);
+
+  useEffect(() => {
+    if (!poId) {
+      setWorkflow({
+        po: false,
+        grn: false,
+        invoice: false,
+        payment: false,
+        grnId: null,
+        invoiceId: null,
+        paymentId: null,
+      });
+      return;
+    }
+
+    const loadWorkflow = async () => {
+      try {
+        const [grnRes, invoiceRes, paymentRes] = await Promise.all([
+          listGRNs({ purchase_order: poId, page_size: 200 }),
+          listSupplierInvoices({ purchase_order: poId, page_size: 200 }),
+          listSupplierPayments({ purchase_order: poId, page_size: 200 }),
+        ]);
+
+        const grns = Array.isArray(grnRes?.results) ? grnRes.results : Array.isArray(grnRes) ? grnRes : [];
+        const invoices = Array.isArray(invoiceRes?.results)
+          ? invoiceRes.results
+          : Array.isArray(invoiceRes)
+            ? invoiceRes
+            : [];
+        const payments = Array.isArray(paymentRes?.results)
+          ? paymentRes.results
+          : Array.isArray(paymentRes)
+            ? paymentRes
+            : [];
+
+        const latestGRN = grns[0] || null;
+        const latestInvoice = invoices[0] || null;
+        const completedPayment = payments.find((p: any) => p.status === 'completed');
+
+        setWorkflow({
+          po: true,
+          grn: !!latestGRN,
+          invoice: !!latestInvoice,
+          payment: !!completedPayment,
+          grnId: latestGRN?.id || null,
+          invoiceId: latestInvoice?.id || null,
+          paymentId: completedPayment?.id || null,
+        });
+      } catch (error) {
+        console.error('Failed to load purchase workflow state:', error);
+      }
+    };
+
+    loadWorkflow();
+  }, [poId]);
+
+  const handleOpenGRNStep = () => {
+    if (!poId) return;
+    if (workflow.grnId) {
+      navigate(`/grns/${workflow.grnId}?po=${poId}`);
+      return;
+    }
+    navigate(`/grns/new?po=${poId}`);
+  };
+
+  const handleOpenInvoiceStep = () => {
+    if (!poId) return;
+    if (workflow.invoiceId) {
+      navigate(`/purchase/invoices?edit=${workflow.invoiceId}&po=${poId}`);
+      return;
+    }
+    if (workflow.grnId) {
+      navigate(`/purchase/invoices?grn=${workflow.grnId}&po=${poId}`);
+      return;
+    }
+    navigate(`/purchase/invoices?po=${poId}`);
+  };
+
+  const handleOpenPaymentStep = () => {
+    if (!poId) return;
+    if (workflow.paymentId) {
+      navigate(`/purchase/payments?edit=${workflow.paymentId}&po=${poId}`);
+      return;
+    }
+    if (workflow.invoiceId) {
+      navigate(`/purchase/payments?invoice=${workflow.invoiceId}&po=${poId}`);
+      return;
+    }
+    navigate(`/purchase/payments?po=${poId}`);
+  };
 
   useEffect(() => {
     const rawSubtotal = form.items.reduce((sum: number, item: any) => {
@@ -101,15 +214,45 @@ const PurchaseOrderFormPage = ({ poId }: Props) => {
       if (poId) {
         await updatePurchaseOrder(poId, payload);
         toast.success('Purchase order updated');
+        navigate(`/purchase-orders/${poId}`);
       } else {
-        await createPurchaseOrder(payload);
+        const created = await createPurchaseOrder(payload);
         toast.success('Purchase order created');
+        if (created?.id) {
+          navigate(`/purchase-orders/${created.id}`);
+        } else {
+          navigate('/purchase/orders');
+        }
       }
-
-      navigate('/purchase/orders');
     } catch (err) {
       console.error(err);
       toast.error('Error saving purchase order');
+    }
+  };
+
+  const handleCreateSupplier = async () => {
+    if (!newSupplier.name || !newSupplier.phone) {
+      toast.error('Supplier name and phone are required');
+      return;
+    }
+
+    try {
+      const created = await createSupplier(newSupplier);
+      setSuppliers((prev) => [created, ...prev]);
+      handleChange('supplier', created.id);
+      setShowNewSupplier(false);
+      setNewSupplier({
+        name: '',
+        phone: '',
+        email: '',
+        contact_person: '',
+        city: '',
+        state: '',
+      });
+      toast.success('Supplier created and selected');
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to create supplier');
     }
   };
 
@@ -117,6 +260,54 @@ const PurchaseOrderFormPage = ({ poId }: Props) => {
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <Toaster position="top-right" />
       <h1 className="text-3xl font-semibold">{poId ? 'Edit' : 'New'} Purchase Order</h1>
+
+      <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-4">
+        <ProcurementFlowStepper
+          currentStep={1}
+          steps={{
+            po: { done: poId ? workflow.po : false, optional: true },
+            grn: { done: workflow.grn, optional: true },
+            pi: { done: workflow.invoice },
+            payment: { done: workflow.payment },
+          }}
+          contextIds={{
+            poId: poId || null,
+            grnId: workflow.grnId,
+            invoiceId: workflow.invoiceId,
+            paymentId: workflow.paymentId,
+          }}
+        />
+
+        {poId ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleOpenGRNStep}
+              className="px-3 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+            >
+              {workflow.grn ? 'Open GRN' : 'Create GRN for this PO'}
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenInvoiceStep}
+              className="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600"
+            >
+              {workflow.invoice ? 'Open Supplier Invoice' : 'Create Supplier Invoice'}
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenPaymentStep}
+              className="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600"
+            >
+              {workflow.payment ? 'Open Payment' : 'Record Payment'}
+            </button>
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+            Save PO first to continue GRN → Supplier Invoice → Payment flow.
+          </p>
+        )}
+      </div>
 
       <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6 space-y-6">
         <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-100">Order Details</h2>
@@ -161,7 +352,68 @@ const PurchaseOrderFormPage = ({ poId }: Props) => {
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => setShowNewSupplier((prev) => !prev)}
+                className="text-xs text-blue-600 hover:text-blue-700"
+              >
+                {showNewSupplier ? 'Cancel new supplier' : '+ Create new supplier'}
+              </button>
+            </div>
           </div>
+
+          {showNewSupplier && (
+            <div className="md:col-span-3 border rounded-lg p-3 bg-blue-50 dark:bg-gray-700/40 border-blue-100 dark:border-gray-600">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <input
+                  className="input w-full"
+                  placeholder="Supplier name *"
+                  value={newSupplier.name}
+                  onChange={(e) => setNewSupplier((prev) => ({ ...prev, name: e.target.value }))}
+                />
+                <input
+                  className="input w-full"
+                  placeholder="Phone *"
+                  value={newSupplier.phone}
+                  onChange={(e) => setNewSupplier((prev) => ({ ...prev, phone: e.target.value }))}
+                />
+                <input
+                  className="input w-full"
+                  placeholder="Email"
+                  value={newSupplier.email}
+                  onChange={(e) => setNewSupplier((prev) => ({ ...prev, email: e.target.value }))}
+                />
+                <input
+                  className="input w-full"
+                  placeholder="Contact person"
+                  value={newSupplier.contact_person}
+                  onChange={(e) => setNewSupplier((prev) => ({ ...prev, contact_person: e.target.value }))}
+                />
+                <input
+                  className="input w-full"
+                  placeholder="City"
+                  value={newSupplier.city}
+                  onChange={(e) => setNewSupplier((prev) => ({ ...prev, city: e.target.value }))}
+                />
+                <input
+                  className="input w-full"
+                  placeholder="State"
+                  value={newSupplier.state}
+                  onChange={(e) => setNewSupplier((prev) => ({ ...prev, state: e.target.value }))}
+                />
+              </div>
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={handleCreateSupplier}
+                  className="px-3 py-1.5 text-sm rounded bg-green-600 text-white hover:bg-green-700"
+                >
+                  Save Supplier
+                </button>
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>

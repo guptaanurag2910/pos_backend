@@ -1,4 +1,5 @@
 from random import randint
+import logging
 
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
@@ -18,6 +19,8 @@ from sales.models import Payment
 
 from .models import Return
 from .serializers import ReturnSerializer
+
+logger = logging.getLogger('return')
 
 
 class ReturnViewSet(viewsets.ModelViewSet):
@@ -68,6 +71,7 @@ class ReturnViewSet(viewsets.ModelViewSet):
         )
 
     def perform_create(self, serializer):
+        logger.info(f"return_create_requested actor_id={self.request.user.id}")
         with transaction.atomic():
             for _ in range(5):
                 try:
@@ -90,15 +94,18 @@ class ReturnViewSet(viewsets.ModelViewSet):
                     ret.save(update_fields=updates)
 
             self._audit('create', ret, {'action': 'create'})
+            logger.info(f"return_create_completed actor_id={self.request.user.id} return_id={ret.id} return_number={ret.return_number}")
 
     def perform_update(self, serializer):
         with transaction.atomic():
             ret = serializer.save()
             self._audit('update', ret, {'action': 'update'})
+            logger.info(f"return_update_completed actor_id={self.request.user.id} return_id={ret.id} status={ret.status}")
 
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
         ret = self.get_object()
+        logger.info(f"return_approve_requested actor_id={request.user.id} return_id={ret.id}")
         if ret.status != 'pending':
             return Response({"detail": "Only pending returns can be approved."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -108,12 +115,14 @@ class ReturnViewSet(viewsets.ModelViewSet):
             ret.processed_at = timezone.now()
             ret.save(update_fields=['status', 'processed_by', 'processed_at'])
             self._audit('approve', ret, {'action': 'approve'})
+            logger.info(f"return_approve_completed actor_id={request.user.id} return_id={ret.id}")
 
         return Response(self.get_serializer(ret).data)
 
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
         ret = self.get_object()
+        logger.info(f"return_reject_requested actor_id={request.user.id} return_id={ret.id}")
         if ret.status != 'pending':
             return Response({"detail": "Only pending returns can be rejected."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -123,12 +132,14 @@ class ReturnViewSet(viewsets.ModelViewSet):
             ret.processed_at = timezone.now()
             ret.save(update_fields=['status', 'processed_by', 'processed_at'])
             self._audit('reject', ret, {'action': 'reject', 'reason': request.data.get('reason')})
+            logger.info(f"return_reject_completed actor_id={request.user.id} return_id={ret.id}")
 
         return Response(self.get_serializer(ret).data)
 
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
         ret = self.get_object()
+        logger.info(f"return_complete_requested actor_id={request.user.id} return_id={ret.id}")
 
         if ret.status != 'approved':
             return Response({"detail": "Return must be approved before completion."}, status=status.HTTP_400_BAD_REQUEST)
@@ -180,6 +191,7 @@ class ReturnViewSet(viewsets.ModelViewSet):
             ret.save(update_fields=['status', 'processed_by', 'processed_at'])
 
             self._audit('complete', ret, {'action': 'complete'})
+            logger.info(f"return_complete_completed actor_id={request.user.id} return_id={ret.id} refund_amount={ret.refund_amount}")
 
         return Response(self.get_serializer(ret).data)
 
@@ -197,3 +209,4 @@ class ReturnViewSet(viewsets.ModelViewSet):
             instance.is_active = False
             instance.save(update_fields=['is_active'])
             self._audit('soft_delete', instance, {'action': 'soft_delete'})
+            logger.info(f"return_soft_delete_completed actor_id={self.request.user.id} return_id={instance.id}")

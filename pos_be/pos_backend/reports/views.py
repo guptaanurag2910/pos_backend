@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import csv
 from io import BytesIO
 from decimal import Decimal
+import logging
 
 import pandas as pd
 from django.db import connection
@@ -29,6 +30,8 @@ from suppliers.models import (
     SupplierInvoiceItem,
     SupplierPayment,
 )
+
+logger = logging.getLogger('reports')
 
 
 class ReportBaseMixin:
@@ -137,6 +140,10 @@ class DashboardView(ReportBaseMixin, views.APIView):
     @extend_schema(responses={200: OpenApiTypes.OBJECT})
     def get(self, request):
         all_time = request.query_params.get('all_time', 'false').lower() == 'true'
+        logger.info(
+            f"Dashboard requested user_id={request.user.id} all_time={all_time} time_range={request.query_params.get('time_range')} "
+            f"start_date={request.query_params.get('start_date')} end_date={request.query_params.get('end_date')} store={request.query_params.get('store')}"
+        )
 
         scoped_completed = self._scope_bill_queryset(
             request,
@@ -322,6 +329,11 @@ class DashboardView(ReportBaseMixin, views.APIView):
             Q(quantity=0) | Q(quantity__lte=F('min_stock'))
         ).order_by('quantity')[:10]
 
+        logger.info(
+            f"Dashboard computed user_id={request.user.id} start_date={start_date} end_date={end_date} "
+            f"bills_count={bills.count()} total_orders={total_orders} total_items={inventory_totals.get('total_items') or 0}"
+        )
+
         return Response({
             'meta': {
                 'startDate': start_date.strftime('%Y-%m-%d'),
@@ -393,6 +405,7 @@ class DashboardView(ReportBaseMixin, views.APIView):
                 'forecastAccuracy': round(float(forecast_accuracy), 2),
             },
         })
+        
 
 
 class SalesReportView(ReportBaseMixin, views.APIView):
@@ -772,6 +785,9 @@ class StoreBootstrapExportView(ReportBaseMixin, views.APIView):
     @extend_schema(responses={200: OpenApiTypes.BINARY})
     def get(self, request):
         store_id = self._resolve_scope_store_id(request)
+        logger.info(
+            f"Bootstrap export requested user_id={request.user.id} scoped_store_id={store_id} store_param={request.query_params.get('store')}"
+        )
         if not store_id:
             return Response({'detail': 'No store available for export.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1093,5 +1109,9 @@ class StoreBootstrapExportView(ReportBaseMixin, views.APIView):
         )
         response['Content-Disposition'] = (
             f'attachment; filename="store_bootstrap_live_{store.code}_{timezone.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
+        )
+        logger.info(
+            f"Bootstrap export success user_id={request.user.id} store_id={store.id} store_code={store.code} "
+            f"inventory_rows={len(inventory_rows)} customers_rows={len(customer_rows)} sales_rows={len(sales_rows)}"
         )
         return response

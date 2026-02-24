@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -24,6 +26,8 @@ from accounts.models import AuditLog
 from accounts.utils import get_client_ip
 from stores.models import Store
 
+logger = logging.getLogger('suppliers')
+
 
 def _to_decimal(value, default='0'):
     try:
@@ -44,12 +48,15 @@ def _resolve_store(request):
     """
     user_store = getattr(request.user, 'store', None)
     if user_store:
+        logger.info(f"store_resolved_from_user user_id={request.user.id} store_id={user_store.id}")
         return user_store
 
     store_id = request.data.get('store')
     if store_id:
         try:
-            return Store.objects.get(id=store_id, is_active=True)
+            store = Store.objects.get(id=store_id, is_active=True)
+            logger.info(f"store_resolved_from_payload user_id={request.user.id} store_id={store.id}")
+            return store
         except Store.DoesNotExist:
             raise ValidationError({"store": "Invalid or inactive store."})
 
@@ -57,11 +64,57 @@ def _resolve_store(request):
     if not fallback:
         fallback = Store.objects.filter(is_active=True).order_by('id').first()
     if fallback:
+        logger.info(f"store_resolved_from_fallback user_id={request.user.id} store_id={fallback.id}")
         return fallback
 
     raise ValidationError(
         {"store": "No active store found. Assign a store to this user or create an active store."}
     )
+
+
+def _recalculate_supplier_payment_effects(supplier):
+    total_completed = SupplierPayment.objects.filter(
+        supplier=supplier,
+        status='completed',
+        is_active=True
+    ).aggregate(total=models.Sum('amount')).get('total') or Decimal('0')
+    supplier.current_balance = total_completed
+    supplier.save(update_fields=['current_balance', 'updated_at'])
+
+
+def _recalculate_po_payment_status(po):
+    total_paid = SupplierPayment.objects.filter(
+        purchase_order=po,
+        status='completed',
+        is_active=True
+    ).aggregate(total=models.Sum('amount')).get('total') or Decimal('0')
+    if total_paid >= po.total:
+        po.payment_status = 'paid'
+    elif total_paid > 0:
+        po.payment_status = 'partially_paid'
+    else:
+        po.payment_status = 'pending'
+    po.save(update_fields=['payment_status', 'updated_at'])
+
+
+def _recalculate_invoice_payment_status(invoice):
+    previous_status = invoice.status
+    total_paid = SupplierPayment.objects.filter(
+        supplier_invoice=invoice,
+        status='completed',
+        is_active=True
+    ).aggregate(total=models.Sum('amount')).get('total') or Decimal('0')
+    invoice.amount_paid = total_paid
+    if total_paid >= invoice.grand_total:
+        invoice.status = 'paid'
+    elif total_paid > 0:
+        invoice.status = 'partially_paid'
+    else:
+        if previous_status in ['paid', 'partially_paid']:
+            invoice.status = 'approved'
+        else:
+            invoice.status = previous_status
+    invoice.save(update_fields=['amount_paid', 'status', 'updated_at'])
 
 class SupplierViewSet(viewsets.ModelViewSet):
     queryset = Supplier.objects.all()
@@ -88,6 +141,7 @@ class SupplierViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         with transaction.atomic():
             supplier = serializer.save(created_by=self.request.user)
+            logger.info(f"supplier_create_completed actor_id={self.request.user.id} supplier_id={supplier.id}")
             
             # Log the action
             AuditLog.objects.create(
@@ -114,9 +168,14 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         return PurchaseOrderSerializer
     
     def get_queryset(self):
-        user = self.request.user
-        if user.role == 'admin':
+        user = getattr(self.request, 'user', None)
+        if not user or not getattr(user, 'is_authenticated', False):
+            return PurchaseOrder.objects.none()
+        role = getattr(user, 'role', None)
+        if role == 'admin':
             return PurchaseOrder.objects.all()
+        if role not in ['manager', 'cashier']:
+            return PurchaseOrder.objects.none()
         if not getattr(user, 'store', None):
             return PurchaseOrder.objects.none()
         return PurchaseOrder.objects.filter(store=user.store)
@@ -125,6 +184,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     def update_status(self, request, pk=None):
         purchase_order = self.get_object()
         new_status = request.data.get('status')
+        logger.info(f"po_status_requested actor_id={request.user.id} po_id={purchase_order.id} new_status={new_status}")
         
         valid_statuses = dict(PurchaseOrder.STATUS_CHOICES).keys()
         if not new_status or new_status not in valid_statuses:
@@ -150,6 +210,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                     'new_status': new_status
                 }
             )
+        logger.info(f"po_status_completed actor_id={request.user.id} po_id={purchase_order.id} new_status={new_status}")
         
         serializer = self.get_serializer(purchase_order)
         return Response(serializer.data)
@@ -176,6 +237,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
             items_data = serializer.validated_data.pop('items', [])  # Extract items here
             po = serializer.save(po_number=po_number, store=store, created_by=self.request.user)
+            logger.info(f"po_create_started actor_id={self.request.user.id} po_id={po.id} po_number={po.po_number}")
 
             # Create each PurchaseOrderItem
             for item_data in items_data:
@@ -192,6 +254,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 object_repr=po.po_number,
                 ip_address=get_client_ip(self.request)
             )
+            logger.info(f"po_create_completed actor_id={self.request.user.id} po_id={po.id} items={len(items_data)}")
 
 class PurchaseOrderItemViewSet(viewsets.ModelViewSet):
     serializer_class = PurchaseOrderItemSerializer
@@ -273,7 +336,7 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
     queryset = GoodsReceiptNote.objects.all()
     permission_classes = [IsAuthenticated, IsManagerUser]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['supplier', 'store', 'status', 'receipt_date', 'purchase_order']
+    filterset_fields = ['supplier', 'store', 'status', 'receipt_date', 'purchase_order', 'is_active']
     search_fields = ['grn_number', 'invoice_number', 'supplier__name', 'notes']
     ordering_fields = ['created_at', 'receipt_date', 'total']
     ordering = ['-created_at']
@@ -284,12 +347,22 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
         return GoodsReceiptNoteSerializer
     
     def get_queryset(self):
-        user = self.request.user
-        if user.role == 'admin':
-            return GoodsReceiptNote.objects.all()
-        if not getattr(user, 'store', None):
+        user = getattr(self.request, 'user', None)
+        if not user or not getattr(user, 'is_authenticated', False):
             return GoodsReceiptNote.objects.none()
-        return GoodsReceiptNote.objects.filter(store=user.store)
+        role = getattr(user, 'role', None)
+        if role not in ['admin', 'manager', 'cashier']:
+            return GoodsReceiptNote.objects.none()
+        include_inactive = str(self.request.query_params.get('include_inactive', 'false')).lower() == 'true'
+        if role == 'admin':
+            qs = GoodsReceiptNote.objects.all()
+        elif not getattr(user, 'store', None):
+            qs = GoodsReceiptNote.objects.none()
+        else:
+            qs = GoodsReceiptNote.objects.filter(store=user.store)
+        if not include_inactive:
+            qs = qs.filter(is_active=True)
+        return qs
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
@@ -365,6 +438,7 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
         grn = self.get_object()
+        logger.info(f"grn_complete_requested actor_id={request.user.id} grn_id={grn.id}")
         
         if grn.status == 'completed':
             return Response(
@@ -446,9 +520,27 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
                 ip_address=get_client_ip(request),
                 details={'action': 'complete'}
             )
+        logger.info(f"grn_complete_completed actor_id={request.user.id} grn_id={grn.id} status={grn.status}")
         
         serializer = self.get_serializer(grn)
         return Response(serializer.data)
+
+    def perform_destroy(self, instance):
+        with transaction.atomic():
+            if not instance.is_active:
+                return
+            instance.is_active = False
+            instance.save(update_fields=['is_active', 'updated_at'])
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='delete',
+                model_name='GoodsReceiptNote',
+                object_id=str(instance.id),
+                object_repr=instance.grn_number,
+                ip_address=get_client_ip(self.request),
+                details={'action': 'soft_delete'}
+            )
+            logger.info(f"grn_soft_delete_completed actor_id={self.request.user.id} grn_id={instance.id}")
 
     def perform_create(self, serializer):
         with transaction.atomic():
@@ -473,6 +565,7 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
             items_data = self.request.data.get('items', [])
             po_items_data = self.request.data.get('po_items', [])
             grn = serializer.save(grn_number=grn_number, store=store, created_by=self.request.user)
+            logger.info(f"grn_create_started actor_id={self.request.user.id} grn_id={grn.id} grn_number={grn.grn_number}")
 
             # Create GRN Items
             for item in items_data:
@@ -522,6 +615,7 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
                 object_repr=grn.grn_number,
                 ip_address=get_client_ip(self.request)
             )
+            logger.info(f"grn_create_completed actor_id={self.request.user.id} grn_id={grn.id} items={len(items_data)}")
 
 
 class GoodsReceiptNoteItemViewSet(viewsets.ModelViewSet):
@@ -564,18 +658,28 @@ class SupplierInvoiceViewSet(viewsets.ModelViewSet):
     serializer_class = SupplierInvoiceSerializer
     permission_classes = [IsAuthenticated, IsManagerUser]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['supplier', 'purchase_order', 'grn', 'store', 'status', 'invoice_date', 'due_date']
+    filterset_fields = ['supplier', 'purchase_order', 'grn', 'store', 'status', 'invoice_date', 'due_date', 'is_active']
     search_fields = ['invoice_number', 'supplier_invoice_number', 'supplier_name', 'po_number', 'grn_number']
     ordering_fields = ['created_at', 'invoice_date', 'due_date', 'grand_total']
     ordering = ['-created_at']
 
     def get_queryset(self):
-        user = self.request.user
-        if user.role == 'admin':
-            return SupplierInvoice.objects.all().order_by('-created_at')
-        if not getattr(user, 'store', None):
+        user = getattr(self.request, 'user', None)
+        if not user or not getattr(user, 'is_authenticated', False):
             return SupplierInvoice.objects.none()
-        return SupplierInvoice.objects.filter(Q(store=user.store) | Q(store__isnull=True)).order_by('-created_at')
+        role = getattr(user, 'role', None)
+        if role not in ['admin', 'manager', 'cashier']:
+            return SupplierInvoice.objects.none()
+        include_inactive = str(self.request.query_params.get('include_inactive', 'false')).lower() == 'true'
+        if role == 'admin':
+            qs = SupplierInvoice.objects.all()
+        elif not getattr(user, 'store', None):
+            qs = SupplierInvoice.objects.none()
+        else:
+            qs = SupplierInvoice.objects.filter(Q(store=user.store) | Q(store__isnull=True))
+        if not include_inactive:
+            qs = qs.filter(is_active=True)
+        return qs.order_by('-created_at')
 
     def perform_create(self, serializer):
         with transaction.atomic():
@@ -613,6 +717,9 @@ class SupplierInvoiceViewSet(viewsets.ModelViewSet):
                     if serializer.validated_data.get('grn') else None
                 )
             )
+            invoice.calculate_totals()
+            invoice.save(update_fields=['subtotal', 'discount_total', 'tax_total', 'grand_total', 'updated_at'])
+            logger.info(f"supplier_invoice_create_completed actor_id={self.request.user.id} invoice_id={invoice.id} invoice_number={invoice.invoice_number}")
 
             AuditLog.objects.create(
                 user=self.request.user,
@@ -626,6 +733,9 @@ class SupplierInvoiceViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         with transaction.atomic():
             invoice = serializer.save()
+            invoice.calculate_totals()
+            invoice.save(update_fields=['subtotal', 'discount_total', 'tax_total', 'grand_total', 'updated_at'])
+            logger.info(f"supplier_invoice_update_completed actor_id={self.request.user.id} invoice_id={invoice.id}")
             AuditLog.objects.create(
                 user=self.request.user,
                 action='update',
@@ -639,6 +749,7 @@ class SupplierInvoiceViewSet(viewsets.ModelViewSet):
     def update_status(self, request, pk=None):
         invoice = self.get_object()
         new_status = request.data.get('status')
+        logger.info(f"supplier_invoice_status_requested actor_id={request.user.id} invoice_id={invoice.id} new_status={new_status}")
         valid_statuses = dict(SupplierInvoice.STATUS_CHOICES).keys()
         if new_status not in valid_statuses:
             return Response(
@@ -647,7 +758,25 @@ class SupplierInvoiceViewSet(viewsets.ModelViewSet):
             )
         invoice.status = new_status
         invoice.save(update_fields=['status', 'updated_at'])
+        logger.info(f"supplier_invoice_status_completed actor_id={request.user.id} invoice_id={invoice.id} new_status={new_status}")
         return Response(self.get_serializer(invoice).data)
+
+    def perform_destroy(self, instance):
+        with transaction.atomic():
+            if not instance.is_active:
+                return
+            instance.is_active = False
+            instance.save(update_fields=['is_active', 'updated_at'])
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='delete',
+                model_name='SupplierInvoice',
+                object_id=str(instance.id),
+                object_repr=instance.invoice_number,
+                ip_address=get_client_ip(self.request),
+                details={'action': 'soft_delete'}
+            )
+            logger.info(f"supplier_invoice_soft_delete_completed actor_id={self.request.user.id} invoice_id={instance.id}")
 
 
 class SupplierInvoiceItemViewSet(viewsets.ModelViewSet):
@@ -664,6 +793,8 @@ class SupplierInvoiceItemViewSet(viewsets.ModelViewSet):
         invoice_id = self.kwargs.get('invoice_pk')
         invoice = SupplierInvoice.objects.get(id=invoice_id)
         item = serializer.save(invoice_id=invoice_id)
+        invoice.calculate_totals()
+        invoice.save(update_fields=['subtotal', 'discount_total', 'tax_total', 'grand_total', 'updated_at'])
         AuditLog.objects.create(
             user=self.request.user,
             action='create',
@@ -675,6 +806,9 @@ class SupplierInvoiceItemViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         item = serializer.save()
+        invoice = item.invoice
+        invoice.calculate_totals()
+        invoice.save(update_fields=['subtotal', 'discount_total', 'tax_total', 'grand_total', 'updated_at'])
         AuditLog.objects.create(
             user=self.request.user,
             action='update',
@@ -685,6 +819,7 @@ class SupplierInvoiceItemViewSet(viewsets.ModelViewSet):
         )
 
     def perform_destroy(self, instance):
+        invoice = instance.invoice
         AuditLog.objects.create(
             user=self.request.user,
             action='delete',
@@ -694,31 +829,45 @@ class SupplierInvoiceItemViewSet(viewsets.ModelViewSet):
             ip_address=get_client_ip(self.request)
         )
         instance.delete()
+        invoice.calculate_totals()
+        invoice.save(update_fields=['subtotal', 'discount_total', 'tax_total', 'grand_total', 'updated_at'])
 
 class SupplierPaymentViewSet(viewsets.ModelViewSet):
     queryset = SupplierPayment.objects.all()
     serializer_class = SupplierPaymentSerializer
     permission_classes = [IsAuthenticated, IsManagerUser]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['supplier', 'purchase_order', 'supplier_invoice', 'payment_method', 'status', 'payment_date']
+    filterset_fields = ['supplier', 'purchase_order', 'supplier_invoice', 'payment_method', 'status', 'payment_date', 'is_active']
     search_fields = ['reference_number', 'notes', 'supplier__name']
     ordering_fields = ['payment_date', 'amount', 'created_at']
     ordering = ['-payment_date']
     
     def get_queryset(self):
-        user = self.request.user
-        if user.role == 'admin':
-            return SupplierPayment.objects.all()
-        
-        # For managers, show payments for purchases from their store
-        return SupplierPayment.objects.filter(
-            Q(purchase_order__store=user.store) | 
-            Q(purchase_order__isnull=True, created_by=user)
-        )
+        user = getattr(self.request, 'user', None)
+        if not user or not getattr(user, 'is_authenticated', False):
+            return SupplierPayment.objects.none()
+        role = getattr(user, 'role', None)
+        if role not in ['admin', 'manager', 'cashier']:
+            return SupplierPayment.objects.none()
+        include_inactive = str(self.request.query_params.get('include_inactive', 'false')).lower() == 'true'
+        if role == 'admin':
+            qs = SupplierPayment.objects.all()
+        else:
+            if not getattr(user, 'store', None):
+                return SupplierPayment.objects.none()
+            # For managers, show payments for purchases from their store
+            qs = SupplierPayment.objects.filter(
+                Q(purchase_order__store=user.store) | 
+                Q(purchase_order__isnull=True, created_by=user)
+            )
+        if not include_inactive:
+            qs = qs.filter(is_active=True)
+        return qs
     
     def perform_create(self, serializer):
         with transaction.atomic():
             payment = serializer.save(created_by=self.request.user)
+            logger.info(f"supplier_payment_create_completed actor_id={self.request.user.id} payment_id={payment.id} amount={payment.amount}")
             
             # Log the action
             AuditLog.objects.create(
@@ -729,3 +878,28 @@ class SupplierPaymentViewSet(viewsets.ModelViewSet):
                 object_repr=str(payment),
                 ip_address=get_client_ip(self.request)
             )
+
+    def perform_destroy(self, instance):
+        with transaction.atomic():
+            if not instance.is_active:
+                return
+            instance.is_active = False
+            instance.save(update_fields=['is_active', 'updated_at'])
+
+            if instance.supplier:
+                _recalculate_supplier_payment_effects(instance.supplier)
+            if instance.purchase_order:
+                _recalculate_po_payment_status(instance.purchase_order)
+            if instance.supplier_invoice:
+                _recalculate_invoice_payment_status(instance.supplier_invoice)
+
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='delete',
+                model_name='SupplierPayment',
+                object_id=str(instance.id),
+                object_repr=str(instance),
+                ip_address=get_client_ip(self.request),
+                details={'action': 'soft_delete'}
+            )
+            logger.info(f"supplier_payment_soft_delete_completed actor_id={self.request.user.id} payment_id={instance.id}")

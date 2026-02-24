@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CreditCard, IndianRupee, Smartphone, X } from 'lucide-react';
-import { toast } from 'react-toastify';
+import toast from 'react-hot-toast';
 import * as salesService from '../../service/salesService';
 import { BillItem } from '../../types';
 
 interface PaymentModalProps {
   total: number;
+  subtotal: number;
+  taxTotal: number;
+  itemDiscountTotal?: number;
   customerId: number | null;
   items: BillItem[];
   discount: number;
@@ -17,6 +20,9 @@ interface PaymentModalProps {
 
 const PaymentModal = ({
   total,
+  subtotal,
+  taxTotal,
+  itemDiscountTotal = 0,
   customerId,
   items,
   discount,
@@ -103,6 +109,29 @@ const PaymentModal = ({
 
   const cashChange = cashReceived ? parseFloat(cashReceived) - total : 0;
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (!loading) void handleComplete();
+        return;
+      }
+
+      if (event.key === '1') setPaymentMethod('cash');
+      if (event.key === '2') setPaymentMethod('card');
+      if (event.key === '3') setPaymentMethod('upi');
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [loading, onClose, handleComplete]);
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg w-full max-w-md mx-4 animate-fade-in">
@@ -114,6 +143,12 @@ const PaymentModal = ({
         </div>
 
         <div className="p-6">
+          <div className="mb-4 rounded-lg border border-gray-200 p-3 text-sm text-gray-700">
+            <div className="flex justify-between"><span>Subtotal</span><span>₹{subtotal.toFixed(2)}</span></div>
+            <div className="flex justify-between"><span>Tax</span><span>₹{taxTotal.toFixed(2)}</span></div>
+            <div className="flex justify-between text-error-700"><span>Item Discounts</span><span>-₹{itemDiscountTotal.toFixed(2)}</span></div>
+            <div className="flex justify-between text-error-700"><span>Bill Discount</span><span>-₹{discount.toFixed(2)}</span></div>
+          </div>
           <div className="mb-6">
             <p className="text-lg font-semibold text-center mb-2">Total Amount</p>
             <p className="text-3xl font-bold text-primary-700 text-center">₹{total.toFixed(2)}</p>
@@ -135,6 +170,7 @@ const PaymentModal = ({
                   <button
                     key={method}
                     type="button"
+                    data-testid={`payment-method-${method}`}
                     className={`flex flex-col items-center justify-center p-3 rounded-lg border transition-colors ${
                       paymentMethod === method
                         ? 'border-primary-500 bg-primary-50 text-primary-700'
@@ -156,9 +192,11 @@ const PaymentModal = ({
                 Cash Received (₹)
               </label>
               <input
+                data-testid="payment-cash-received"
                 type="number"
                 value={cashReceived}
                 onChange={handleCashReceivedChange}
+                autoFocus
                 className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                 placeholder="Enter amount"
               />
@@ -185,6 +223,7 @@ const PaymentModal = ({
             </button>
             <button
               type="button"
+              data-testid="payment-complete"
               onClick={handleComplete}
               disabled={loading}
               className="flex-1 py-2 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700"

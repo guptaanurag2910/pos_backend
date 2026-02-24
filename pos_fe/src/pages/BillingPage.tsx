@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import toast from 'react-hot-toast';
 import {
   CreditCard,
   PauseCircle,
@@ -32,6 +33,7 @@ const BillingPage = () => {
     addProductToBill,
     removeItemFromBill,
     updateItemQuantity,
+    updateItemDiscount,
     applyDiscount,
     setCustomer,
     clearBill,
@@ -45,9 +47,13 @@ const BillingPage = () => {
   const [heldBillsData, setHeldBillsData] = useState<Bill[]>([]);
   const [resumedBill, setResumedBill] = useState<Bill | null>(null);
   const productSearchRef = useRef<HTMLInputElement>(null);
+  const itemDiscountTotal = currentBill.items.reduce((sum, item) => sum + Number(item.discount || 0), 0);
 
   const handleProductSelect = (product: Product) => {
-    addProductToBill(product, 1);
+    const result = addProductToBill(product, 1);
+    if (!result.ok && result.message) {
+      toast.error(result.message);
+    }
   };
 
   const handleCustomerSelect = (customer: Customer | null) => {
@@ -167,6 +173,7 @@ const BillingPage = () => {
           </p>
         </div>
         <button
+          data-testid="billing-held-bills"
           onClick={loadHeldBills}
           className="flex items-center py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
         >
@@ -184,6 +191,7 @@ const BillingPage = () => {
           <BillItemsList
             items={currentBill.items}
             updateQuantity={updateItemQuantity}
+            updateDiscount={updateItemDiscount}
             removeItem={removeItemFromBill}
           />
 
@@ -191,6 +199,7 @@ const BillingPage = () => {
             <div className="p-4 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
               <div className="flex flex-col sm:flex-row justify-between space-y-3 sm:space-y-0 sm:space-x-3">
                 <button
+                  data-testid="billing-hold-bill"
                   onClick={handleHoldBill}
                   disabled={currentBill.items.length === 0}
                   className={`flex items-center justify-center py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-lg ${
@@ -204,6 +213,7 @@ const BillingPage = () => {
                 </button>
 
                 <button
+                  data-testid="billing-proceed-payment"
                   onClick={() => setShowPaymentModal(true)}
                   disabled={currentBill.items.length === 0}
                   className={`flex items-center justify-center py-2 px-4 rounded-lg ${
@@ -259,6 +269,7 @@ const BillingPage = () => {
                 <BillSummary
                   subtotal={currentBill.subtotal}
                   taxTotal={currentBill.taxTotal}
+                  itemDiscountTotal={itemDiscountTotal}
                   discount={currentBill.discount}
                   total={currentBill.total}
                 />
@@ -283,6 +294,7 @@ const BillingPage = () => {
                     </>
                   ) : (
                     <button
+                      data-testid="billing-apply-discount"
                       onClick={() => setShowDiscountModal(true)}
                       className="flex items-center justify-center w-full py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
                     >
@@ -292,6 +304,7 @@ const BillingPage = () => {
                   )}
 
                   <button
+                    data-testid="billing-pay-button"
                     onClick={() => setShowPaymentModal(true)}
                     className="flex items-center justify-center w-full py-2 px-4 bg-primary-600 dark:bg-primary-500 text-white rounded-lg hover:bg-primary-700 dark:hover:bg-primary-600"
                   >
@@ -320,6 +333,13 @@ const BillingPage = () => {
       {showPaymentModal && (
         <PaymentModal
           total={resumedBill ? parseFloat(resumedBill.total) : currentBill.total}
+          subtotal={resumedBill ? parseFloat(resumedBill.subtotal || '0') : currentBill.subtotal}
+          taxTotal={resumedBill ? parseFloat(resumedBill.tax_total || '0') : currentBill.taxTotal}
+          itemDiscountTotal={resumedBill
+            ? (Array.isArray(resumedBill.items)
+                ? resumedBill.items.reduce((sum: number, item: any) => sum + parseFloat(item.discount_amount || '0'), 0)
+                : 0)
+            : itemDiscountTotal}
           customerId={resumedBill?.customer ?? currentBill.customerId ?? null}
           items={
             resumedBill

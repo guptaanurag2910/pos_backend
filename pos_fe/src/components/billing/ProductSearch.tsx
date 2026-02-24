@@ -18,6 +18,25 @@ const ProductSearch = ({ onSelectProduct, inputRef }: ProductSearchProps) => {
   const barcodeBuffer = useRef('');
   const barcodeTimer = useRef<NodeJS.Timeout | null>(null);
 
+  const toNumber = (value: any, fallback = 0) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const normalizeProduct = (product: any): Product => {
+    const stockDetails = Array.isArray(product?.stock_details) ? product.stock_details : [];
+    const totalStock = stockDetails.length
+      ? stockDetails.reduce((sum: number, level: any) => sum + toNumber(level?.quantity, 0), 0)
+      : toNumber(product?.current_stock, toNumber(product?.stock, 0));
+
+    return {
+      ...product,
+      stock: totalStock,
+      category: product.category_name || product.category || 'Uncategorized',
+      unit: product.unit || 'piece',
+    } as Product;
+  };
+
   // Manual input search
   useEffect(() => {
     const handleSearch = async () => {
@@ -30,7 +49,7 @@ const ProductSearch = ({ onSelectProduct, inputRef }: ProductSearchProps) => {
       setIsLoading(true);
       try {
         const response = await listProducts({ search: query });
-        const products = response.results || [];
+        const products = (response.results || []).map(normalizeProduct);
         setResults(products);
         setIsOpen(products.length > 0);
       } catch (error) {
@@ -71,12 +90,18 @@ const ProductSearch = ({ onSelectProduct, inputRef }: ProductSearchProps) => {
     setIsLoading(true);
     try {
       const response = await listProducts({ search: barcode });
-      const matches = response.results || [];
+      const matches = (response.results || []).map(normalizeProduct);
 
       if (matches.length === 1) {
-        onSelectProduct(matches[0]);
-        setQuery('');
-        setIsOpen(false);
+        if ((matches[0].stock || 0) > 0) {
+          onSelectProduct(matches[0]);
+          setQuery('');
+          setIsOpen(false);
+        } else {
+          setResults(matches);
+          setQuery(barcode);
+          setIsOpen(true);
+        }
       } else {
         setResults(matches);
         setQuery(barcode);
@@ -101,6 +126,9 @@ const ProductSearch = ({ onSelectProduct, inputRef }: ProductSearchProps) => {
   }, []);
 
   const handleSelectProduct = (product: Product) => {
+    if ((product.stock || 0) <= 0) {
+      return;
+    }
     onSelectProduct(product);
     setQuery('');
     setIsOpen(false);
@@ -119,6 +147,7 @@ const ProductSearch = ({ onSelectProduct, inputRef }: ProductSearchProps) => {
 
         <input
           ref={inputRef}
+          data-testid="billing-product-search"
           type="text"
           placeholder="Search or scan barcode..."
           value={query}
@@ -133,8 +162,13 @@ const ProductSearch = ({ onSelectProduct, inputRef }: ProductSearchProps) => {
             {results.map((product) => (
               <li
                 key={product.id}
+                data-testid="billing-product-result"
                 onClick={() => handleSelectProduct(product)}
-                className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center justify-between"
+                className={`px-4 py-2 flex items-center justify-between ${
+                  (product.stock || 0) > 0
+                    ? 'hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer'
+                    : 'opacity-60 cursor-not-allowed'
+                }`}
               >
                 <div className="flex items-center">
                   {product.image ? (
@@ -160,6 +194,8 @@ const ProductSearch = ({ onSelectProduct, inputRef }: ProductSearchProps) => {
                     ₹{Number(product.price || 0).toFixed(2)}
                   </p>
                   <button
+                    data-testid="billing-add-product"
+                    disabled={(product.stock || 0) <= 0}
                     className="p-1 bg-primary-100 dark:bg-primary-900 text-primary-600 dark:text-primary-400 rounded-full hover:bg-primary-200 dark:hover:bg-primary-800"
                     onClick={(e) => {
                       e.stopPropagation();

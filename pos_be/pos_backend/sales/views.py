@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -11,6 +13,7 @@ from rest_framework import serializers
 from decimal import Decimal, InvalidOperation
 
 from .models import Bill, BillItem, Payment
+from inventory.models import StockLevel
 from .serializers import (
     BillSerializer, BillItemSerializer, BillDetailSerializer,
     PaymentSerializer, CreateBillSerializer
@@ -19,6 +22,8 @@ from accounts.permissions import IsManagerUser
 from accounts.models import AuditLog
 from accounts.utils import get_client_ip
 from stores.models import Store
+
+logger = logging.getLogger('sales')
 
 
 def _resolve_store(request):
@@ -39,6 +44,49 @@ def _resolve_store(request):
             return Store.objects.get(id=store_id, is_active=True)
         except Store.DoesNotExist:
             raise serializers.ValidationError({"store": "Invalid or inactive store."})
+
+    # If user/store is not explicitly set, try to infer a store that can satisfy
+    # the requested items. This keeps validation and final bill store consistent.
+    requested_items = request.data.get('items') if hasattr(request, 'data') else None
+    if isinstance(requested_items, list) and requested_items:
+        requested_by_product = {}
+        for item in requested_items:
+            product_id = item.get('product_id') or item.get('product')
+            quantity_raw = item.get('quantity', 0)
+            try:
+                product_id = int(product_id)
+                quantity = Decimal(str(quantity_raw))
+            except (TypeError, ValueError, InvalidOperation):
+                continue
+            if quantity > 0:
+                requested_by_product[product_id] = requested_by_product.get(product_id, Decimal('0')) + quantity
+
+        if requested_by_product:
+            matching_store_ids = []
+            active_store_ids = list(Store.objects.filter(is_active=True).order_by('id').values_list('id', flat=True))
+            for candidate_store_id in active_store_ids:
+                is_match = True
+                for product_id, requested_qty in requested_by_product.items():
+                    available_raw = StockLevel.objects.filter(
+                        store_id=candidate_store_id,
+                        product_id=product_id,
+                    ).aggregate(total=Sum('quantity')).get('total') or Decimal('0')
+                    available_qty = Decimal(str(available_raw))
+                    if available_qty < requested_qty:
+                        is_match = False
+                        break
+                if is_match:
+                    matching_store_ids.append(candidate_store_id)
+
+            if matching_store_ids:
+                preferred = Store.objects.filter(
+                    id__in=matching_store_ids,
+                    is_main=True,
+                    is_active=True
+                ).first()
+                if preferred:
+                    return preferred
+                return Store.objects.get(id=matching_store_ids[0])
 
     fallback = Store.objects.filter(is_main=True, is_active=True).first()
     if not fallback:
@@ -100,6 +148,9 @@ class BillViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
         bill = self.get_object()
+        logger.info(
+            f"Bill complete requested bill_id={bill.id} bill_number={bill.bill_number} status={bill.status} user_id={request.user.id}"
+        )
         
         if bill.status == 'completed':
             return Response(
@@ -178,6 +229,9 @@ class BillViewSet(viewsets.ModelViewSet):
             )
         
         serializer = BillDetailSerializer(bill, context={'request': request})
+        logger.info(
+            f"Bill complete success bill_id={bill.id} bill_number={bill.bill_number} payment_status={bill.payment_status} user_id={request.user.id}"
+        )
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
@@ -259,8 +313,14 @@ class BillViewSet(viewsets.ModelViewSet):
         })
 
     def create(self, request, *args, **kwargs):
+        logger.info(
+            f"Bill create requested user_id={request.user.id} payload_keys={list(request.data.keys())}"
+        )
+        resolved_store = _resolve_store(request)
         serializer = self.get_serializer(data=request.data)
+        serializer.context['resolved_store'] = resolved_store
         serializer.is_valid(raise_exception=True)
+        self._resolved_store = resolved_store
 
         # Save using perform_create (which includes business logic like bill_number etc.)
         self.perform_create(serializer)
@@ -268,6 +328,9 @@ class BillViewSet(viewsets.ModelViewSet):
 
         # Serialize the full bill response using BillDetailSerializer
         response_serializer = BillDetailSerializer(bill, context={'request': request})
+        logger.info(
+            f"Bill create success bill_id={bill.id} bill_number={bill.bill_number} store_id={bill.store_id} user_id={request.user.id}"
+        )
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
     
     @action(detail=True, methods=['post'])
@@ -363,7 +426,8 @@ class BillViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         with transaction.atomic():
             user = self.request.user
-            store = _resolve_store(self.request)
+            store = getattr(self, '_resolved_store', None) or _resolve_store(self.request)
+            logger.info(f"Bill perform_create resolved store_id={store.id} store_code={store.code} user_id={user.id}")
 
             last_bill = Bill.objects.filter(store=store).order_by('-created_at').first()
 

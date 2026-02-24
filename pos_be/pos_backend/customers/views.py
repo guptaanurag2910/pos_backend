@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -12,6 +14,8 @@ from .serializers import CustomerSerializer, CustomerGroupSerializer
 from accounts.permissions import IsManagerUser
 from accounts.models import AuditLog
 from accounts.utils import get_client_ip
+
+logger = logging.getLogger('customers')
 
 class CustomerViewSet(viewsets.ModelViewSet):
     queryset = Customer.objects.all()
@@ -49,6 +53,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def add_points(self, request, pk=None):
         customer = self.get_object()
+        logger.info(f"customer_points_requested actor_id={request.user.id} customer_id={customer.id}")
         points = request.data.get('points', 0)
         reason = request.data.get('reason', 'Manual adjustment')
         
@@ -92,6 +97,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
                     'new_balance': customer.loyalty_points
                 }
             )
+        logger.info(f"customer_points_completed actor_id={request.user.id} customer_id={customer.id} points={points}")
         
         serializer = self.get_serializer(customer)
         return Response(serializer.data)
@@ -99,6 +105,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         with transaction.atomic():
             customer = serializer.save(created_by=self.request.user)
+            logger.info(f"customer_create_completed actor_id={self.request.user.id} customer_id={customer.id}")
             
             # Log the action
             AuditLog.objects.create(
@@ -113,6 +120,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         with transaction.atomic():
             customer = serializer.save()
+            logger.info(f"customer_update_completed actor_id={self.request.user.id} customer_id={customer.id}")
             
             # Log the action
             AuditLog.objects.create(
@@ -126,6 +134,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         with transaction.atomic():
+            logger.info(f"customer_soft_delete_requested actor_id={self.request.user.id} customer_id={instance.id}")
             instance.is_active = False
             instance.save(update_fields=['is_active', 'updated_at'])
             AuditLog.objects.create(
@@ -141,6 +150,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def stats(self, request):
         """Get customer statistics"""
+        logger.info(f"customer_stats_requested actor_id={request.user.id}")
         total_customers = Customer.objects.count()
         active_customers = Customer.objects.filter(
             bills__created_at__gte=timezone.now() - timezone.timedelta(days=90)
@@ -170,6 +180,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     def merge(self, request):
         primary_id = request.data.get('primary_customer_id')
         duplicate_ids = request.data.get('duplicate_customer_ids', [])
+        logger.info(f"customer_merge_requested actor_id={request.user.id} primary_id={primary_id} duplicate_count={len(duplicate_ids)}")
 
         if not primary_id or not isinstance(duplicate_ids, list) or not duplicate_ids:
             return Response(
@@ -223,6 +234,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
                 details={'action': 'merge', 'duplicate_customer_ids': merged_ids}
             )
 
+        logger.info(f"customer_merge_completed actor_id={request.user.id} primary_id={primary.id} merged_count={len(merged_ids)}")
         return Response({
             'detail': 'Customers merged successfully.',
             'primary_customer_id': primary.id,
@@ -241,6 +253,7 @@ class CustomerGroupViewSet(viewsets.ModelViewSet):
     def add_customers(self, request, pk=None):
         group = self.get_object()
         customer_ids = request.data.get('customer_ids', [])
+        logger.info(f"customer_group_add_requested actor_id={request.user.id} group_id={group.id} customer_count={len(customer_ids)}")
         
         if not customer_ids:
             return Response(
@@ -273,6 +286,7 @@ class CustomerGroupViewSet(viewsets.ModelViewSet):
                     'customer_ids': list(customers.values_list('id', flat=True))
                 }
             )
+        logger.info(f"customer_group_add_completed actor_id={request.user.id} group_id={group.id}")
         
         serializer = self.get_serializer(group)
         return Response(serializer.data)
@@ -281,6 +295,7 @@ class CustomerGroupViewSet(viewsets.ModelViewSet):
     def remove_customers(self, request, pk=None):
         group = self.get_object()
         customer_ids = request.data.get('customer_ids', [])
+        logger.info(f"customer_group_remove_requested actor_id={request.user.id} group_id={group.id} customer_count={len(customer_ids)}")
         
         if not customer_ids:
             return Response(
@@ -313,6 +328,7 @@ class CustomerGroupViewSet(viewsets.ModelViewSet):
                     'customer_ids': list(customers.values_list('id', flat=True))
                 }
             )
+        logger.info(f"customer_group_remove_completed actor_id={request.user.id} group_id={group.id}")
         
         serializer = self.get_serializer(group)
         return Response(serializer.data)
@@ -320,6 +336,7 @@ class CustomerGroupViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         with transaction.atomic():
             group = serializer.save(created_by=self.request.user)
+            logger.info(f"customer_group_create_completed actor_id={self.request.user.id} group_id={group.id}")
             
             # Log the action
             AuditLog.objects.create(

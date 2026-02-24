@@ -14,6 +14,24 @@ export interface AuthResponse {
   };
 }
 
+export interface RegisterWithStorePayload {
+  email: string;
+  name: string;
+  password: string;
+  store: {
+    name: string;
+    code: string;
+    address: string;
+    city: string;
+    state: string;
+    pincode: string;
+    phone: string;
+    email?: string | null;
+    is_main?: boolean;
+    is_active?: boolean;
+  };
+}
+
 export const loginAPI = async (email: string, password: string): Promise<AuthResponse> => {
   const res = await axiosInstance.post(`${AUTH_URL}token/`, { email, password });
   return {
@@ -36,6 +54,26 @@ export const signupAPI = async (
 ): Promise<AuthResponse> => {
   await axiosInstance.post(`${AUTH_URL}register/`, { email, password, name });
   return loginAPI(email, password); // Immediately login after signup
+};
+
+export const signupWithStoreAPI = async (
+  payload: RegisterWithStorePayload
+): Promise<AuthResponse & { store: { id: number } }> => {
+  const res = await axiosInstance.post(`${AUTH_URL}register-with-store/`, payload);
+  return {
+    access: res.data.access,
+    refresh: res.data.refresh,
+    user: {
+      user_id: res.data.user.user_id,
+      email: res.data.user.email,
+      name: res.data.user.name,
+      role: res.data.user.role,
+      store_id: res.data.user.store_id,
+    },
+    store: {
+      id: res.data.store.id,
+    },
+  };
 };
 
 export const patchUser = async (
@@ -63,11 +101,11 @@ export const refreshToken = async (): Promise<{ access: string }> => {
 export const getProfile = async (): Promise<User> => {
   const res = await axiosInstance.get(`${AUTH_URL}users/me/`);
   return {
-    user_id: res.data.user_id,
+    user_id: res.data.user_id ?? res.data.id,
     email: res.data.email,
     name: res.data.name,
     role: res.data.role,
-    store_id: res.data.store_id,
+    store_id: res.data.store_id ?? res.data.store ?? null,
   };
 };
 

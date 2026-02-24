@@ -27,7 +27,7 @@ class Return(models.Model):
     refund_amount = models.DecimalField(max_digits=10, decimal_places=2)
     refund_method = models.CharField(max_length=20, choices=REFUND_METHOD_CHOICES)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
-    return_date = models.DateField(default=timezone.now)
+    return_date = models.DateField(default=timezone.localdate)
     notes = models.TextField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
 

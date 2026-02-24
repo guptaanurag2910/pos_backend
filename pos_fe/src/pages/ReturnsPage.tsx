@@ -1,5 +1,5 @@
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   RotateCcw,
   Search,
@@ -20,11 +20,13 @@ import {
   createReturn,
   approveReturn,
   rejectReturn,
+  completeReturn,
   Return as ReturnAPI,
   CreateReturnPayload
 } from '../service/returnsService';
 import { listBills, getBill } from '../service/salesService';
 import { Bill } from '../types';
+import toast from 'react-hot-toast';
 
 const ReturnsPage = () => {
   const { user } = useAuthStore();
@@ -37,7 +39,25 @@ const ReturnsPage = () => {
   const [selectedReturn, setSelectedReturn] = useState<ReturnAPI | null>(null);
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
   const [returns, setReturns] = useState<ReturnAPI[]>([]);
+  const [selectedRow, setSelectedRow] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const filteredReturns = useMemo(
+    () =>
+      returns.filter((returnItem) => {
+        const matchesSearch = searchQuery
+          ? (returnItem.returnNumber?.toLowerCase()?.includes(searchQuery.toLowerCase()) ||
+             returnItem.billNumber?.toLowerCase()?.includes(searchQuery.toLowerCase()) ||
+             returnItem.customerName?.toLowerCase()?.includes(searchQuery.toLowerCase()))
+          : true;
+
+        const matchesStatus = statusFilter === 'all' || returnItem.status === statusFilter;
+        const matchesDate = dateFilter ? returnItem.returnDate === dateFilter : true;
+
+        return matchesSearch && matchesStatus && matchesDate;
+      }),
+    [returns, searchQuery, statusFilter, dateFilter]
+  );
 
   useEffect(() => {
     fetchReturns();
@@ -68,6 +88,25 @@ const ReturnsPage = () => {
         return;
       }
 
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setSelectedRow((prev) => Math.min(prev + 1, Math.max(filteredReturns.length - 1, 0)));
+        return;
+      }
+
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setSelectedRow((prev) => Math.max(prev - 1, 0));
+        return;
+      }
+
+      if (event.key === 'Enter' && filteredReturns.length > 0 && !showReturnModal && !showDetailsModal) {
+        event.preventDefault();
+        const selected = filteredReturns[selectedRow];
+        if (selected) handleViewReturn(selected);
+        return;
+      }
+
       if (isCtrlOrMeta && key === 'r') {
         event.preventDefault();
         void fetchReturns();
@@ -83,7 +122,11 @@ const ReturnsPage = () => {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showReturnModal, showDetailsModal]);
+  }, [showReturnModal, showDetailsModal, filteredReturns, selectedRow]);
+
+  useEffect(() => {
+    setSelectedRow((prev) => Math.min(prev, Math.max(filteredReturns.length - 1, 0)));
+  }, [filteredReturns.length]);
 
   const fetchReturns = async () => {
     try {
@@ -112,7 +155,7 @@ const ReturnsPage = () => {
       setShowReturnModal(true);
     } catch (err) {
       console.error('Failed to fetch bill details:', err);
-      alert('Unable to load bill details');
+      toast.error('Unable to load bill details');
     }
   };
 
@@ -124,7 +167,7 @@ const ReturnsPage = () => {
       setShowReturnModal(false);
     } catch (err) {
       console.error('Failed to create return:', err);
-      alert('Failed to process return.');
+      throw err;
     }
   };
 
@@ -136,18 +179,33 @@ const ReturnsPage = () => {
   const handleApproveReturn = async (returnId: number) => {
     try {
       await approveReturn(returnId);
+      toast.success('Return approved');
       await fetchReturns(); // Refresh after approval
     } catch (err) {
       console.error('Approve failed:', err);
+      toast.error('Failed to approve return');
     }
   };
 
   const handleRejectReturn = async (returnId: number) => {
     try {
       await rejectReturn(returnId);
+      toast.success('Return rejected');
       await fetchReturns(); // Refresh after rejection
     } catch (err) {
       console.error('Reject failed:', err);
+      toast.error('Failed to reject return');
+    }
+  };
+
+  const handleCompleteReturn = async (returnId: number) => {
+    try {
+      await completeReturn(returnId);
+      toast.success('Return completed');
+      await fetchReturns();
+    } catch (err) {
+      console.error('Complete failed:', err);
+      toast.error('Failed to complete return');
     }
   };
 
@@ -181,19 +239,6 @@ const ReturnsPage = () => {
     }
   };
 
-  const filteredReturns = returns.filter((returnItem) => {
-  const matchesSearch = searchQuery
-    ? (returnItem.returnNumber?.toLowerCase()?.includes(searchQuery.toLowerCase()) ||
-       returnItem.billNumber?.toLowerCase()?.includes(searchQuery.toLowerCase()) ||
-       returnItem.customerName?.toLowerCase()?.includes(searchQuery.toLowerCase()))
-    : true;
-
-  const matchesStatus = statusFilter === 'all' || returnItem.status === statusFilter;
-  const matchesDate = dateFilter ? returnItem.returnDate === dateFilter : true;
-
-  return matchesSearch && matchesStatus && matchesDate;
-});
-
   // ✅ Updated logic: treat both "approved" and "completed" as completed
   const completedStatuses = ['approved', 'completed'];
   const totalReturns = returns.length;
@@ -215,6 +260,7 @@ const ReturnsPage = () => {
         </div>
         
         <button 
+          data-testid="returns-process-button"
           onClick={() => setShowReturnModal(true)}
           className="flex items-center px-4 py-2 bg-primary-600 dark:bg-primary-500 text-white rounded-lg hover:bg-primary-700 dark:hover:bg-primary-600"
         >
@@ -283,6 +329,7 @@ const ReturnsPage = () => {
             </div>
             <input
               ref={searchInputRef}
+              data-testid="returns-search"
               type="text"
               placeholder="Search returns..."
               value={searchQuery}
@@ -347,8 +394,11 @@ const ReturnsPage = () => {
               </tr>
             </thead>
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              {filteredReturns.map((returnItem) => (
-                <tr key={returnItem.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+              {filteredReturns.map((returnItem, idx) => (
+                <tr
+                  key={returnItem.id}
+                  className={`hover:bg-gray-50 dark:hover:bg-gray-700 ${idx === selectedRow ? 'bg-primary-50 dark:bg-primary-900/20' : ''}`}
+                >
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div>
                       <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -408,7 +458,7 @@ const ReturnsPage = () => {
                       >
                         <Eye size={16} />
                       </button>
-                      {returnItem.status === 'pending' && user?.role === 'admin' && (
+                      {returnItem.status === 'pending' && (user?.role === 'admin' || user?.role === 'manager') && (
                         <>
                           <button 
                             onClick={() => handleApproveReturn(returnItem.id)}
@@ -423,6 +473,15 @@ const ReturnsPage = () => {
                             <XCircle size={16} />
                           </button>
                         </>
+                      )}
+                      {returnItem.status === 'approved' && (user?.role === 'admin' || user?.role === 'manager') && (
+                        <button
+                          onClick={() => handleCompleteReturn(returnItem.id)}
+                          className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300"
+                          title="Complete Return"
+                        >
+                          <CheckCircle size={16} />
+                        </button>
                       )}
                     </div>
                   </td>

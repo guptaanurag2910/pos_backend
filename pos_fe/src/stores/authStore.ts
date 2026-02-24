@@ -7,12 +7,30 @@ import {
   listUsers,
   deleteUser,
   signupAPI,
+  signupWithStoreAPI,
 } from '../service/authService';
 import axiosInstance from '../utils/axiosInstance';
 
 interface AuthStore extends AuthState {
   login: (email: string, password: string) => Promise<boolean>;
   register: (name: string, email: string, password: string) => Promise<boolean>;
+  registerWithStore: (payload: {
+    name: string;
+    email: string;
+    password: string;
+    store: {
+      name: string;
+      code: string;
+      address: string;
+      city: string;
+      state: string;
+      pincode: string;
+      phone: string;
+      email?: string | null;
+      is_main?: boolean;
+      is_active?: boolean;
+    };
+  }) => Promise<{ ok: boolean; storeId?: number }>;
   logout: () => void;
   loadUserFromToken: () => Promise<void>;
   loadUsers: () => Promise<void>;
@@ -73,6 +91,20 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
   },
 
+  registerWithStore: async (payload) => {
+    try {
+      const response = await signupWithStoreAPI(payload);
+      localStorage.setItem('access_token', response.access);
+      localStorage.setItem('refresh_token', response.refresh);
+      set({ user: normalizeUser(response.user), isAuthenticated: true });
+      await get().loadUsers();
+      return { ok: true, storeId: response.store.id };
+    } catch (error) {
+      console.error('Register with store error:', error);
+      return { ok: false };
+    }
+  },
+
   logout: () => {
     logoutAPI().catch((err) => console.error('Logout failed:', err));
     localStorage.removeItem('access_token');
@@ -109,7 +141,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       name: payload.name,
       email: payload.email,
       role: payload.role,
-      store: payload.storeId ? Number(payload.storeId) : null,
+      store: payload.storeId ? Number(payload.storeId) : Number(get().user?.storeId || 0) || null,
       password: payload.password || 'Temp@12345',
     };
 

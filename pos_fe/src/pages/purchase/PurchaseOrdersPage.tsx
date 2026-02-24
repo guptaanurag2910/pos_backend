@@ -1,22 +1,83 @@
 import { useEffect, useState } from 'react';
 import {
-  Plus, Search, Clock, CheckCircle, Truck, Eye, Trash, Send
+  Plus, Search, Clock, CheckCircle, Truck, Eye, Trash, Send, Circle
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { listPurchaseOrders, deletePurchaseOrder } from '../../service/purchaseService';
+import {
+  listPurchaseOrders,
+  deletePurchaseOrder,
+  listGRNs,
+  listSupplierInvoices,
+  listSupplierPayments,
+} from '../../service/purchaseService';
+import ProcurementFlowStepper from '../../components/purchase/ProcurementFlowStepper';
 
 const PurchaseOrdersPage = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [workflowMap, setWorkflowMap] = useState<Record<number, {
+    grn: boolean;
+    invoice: boolean;
+    payment: boolean;
+    grnId?: number | null;
+    invoiceId?: number | null;
+    paymentId?: number | null;
+  }>>({});
   const navigate = useNavigate();
 
   useEffect(() => {
-    listPurchaseOrders()
-      .then((res) => setPurchaseOrders(res.results || []))
-      .catch(console.error);
+    const loadData = async () => {
+      try {
+        const [poRes, grnRes, invoiceRes, paymentRes] = await Promise.all([
+          listPurchaseOrders({ page_size: 500 }),
+          listGRNs({ page_size: 500 }),
+          listSupplierInvoices({ page_size: 500 }),
+          listSupplierPayments({ page_size: 500 }),
+        ]);
+
+        const poList = Array.isArray(poRes?.results) ? poRes.results : [];
+        const grnList = Array.isArray(grnRes?.results) ? grnRes.results : [];
+        const invoiceList = Array.isArray(invoiceRes?.results) ? invoiceRes.results : [];
+        const paymentList = Array.isArray(paymentRes?.results) ? paymentRes.results : [];
+
+        setPurchaseOrders(poList);
+
+        const nextMap: Record<number, {
+          grn: boolean;
+          invoice: boolean;
+          payment: boolean;
+          grnId?: number | null;
+          invoiceId?: number | null;
+          paymentId?: number | null;
+        }> = {};
+        poList.forEach((po: any) => {
+          const id = Number(po.id);
+          const poGRNs = grnList.filter((g: any) => Number(g.purchase_order) === id);
+          const poInvoices = invoiceList.filter((inv: any) => Number(inv.purchase_order) === id);
+          const poPayments = paymentList.filter((p: any) => Number(p.purchase_order) === id);
+          const latestGRN = poGRNs[0] || null;
+          const latestInvoice = poInvoices[0] || null;
+          const latestPayment = poPayments[0] || null;
+          const completedPayment = poPayments.find((p: any) => p.status === 'completed') || latestPayment;
+          nextMap[id] = {
+            grn: !!latestGRN,
+            invoice: !!latestInvoice,
+            payment: !!completedPayment,
+            grnId: latestGRN?.id || null,
+            invoiceId: latestInvoice?.id || null,
+            paymentId: completedPayment?.id || null,
+          };
+        });
+        setWorkflowMap(nextMap);
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    loadData();
   }, []);
 
   const confirmDelete = async () => {
@@ -61,6 +122,17 @@ const PurchaseOrdersPage = () => {
 
   return (
     <div className="space-y-6">
+      <ProcurementFlowStepper
+        currentStep={1}
+        steps={{
+          po: { done: true, optional: true },
+          grn: { done: false, optional: true },
+          pi: { done: false },
+          payment: { done: false },
+        }}
+        showScenarioActions
+      />
+
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Purchase Orders</h1>
@@ -150,11 +222,57 @@ const PurchaseOrdersPage = () => {
                   })()}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">₹{Number(po.total).toLocaleString('en-IN')}</td>
-                <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-200">
-                  {new Date(po.expected_delivery_date).toLocaleDateString()}
+                    <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-200">
+                  {po.expected_delivery_date ? new Date(po.expected_delivery_date).toLocaleDateString() : '-'}
                 </td>
                 <td className="px-6 py-4 text-right">
-                  <div className="flex justify-end space-x-2">
+                  <div className="flex justify-end flex-wrap gap-2">
+                    <span className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-[11px] dark:border-gray-700">
+                      {workflowMap[po.id]?.grn ? <CheckCircle size={12} className="text-green-600" /> : <Circle size={12} className="text-gray-400" />}
+                      GRN
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-[11px] dark:border-gray-700">
+                      {workflowMap[po.id]?.invoice ? <CheckCircle size={12} className="text-green-600" /> : <Circle size={12} className="text-gray-400" />}
+                      SI
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-[11px] dark:border-gray-700">
+                      {workflowMap[po.id]?.payment ? <CheckCircle size={12} className="text-green-600" /> : <Circle size={12} className="text-gray-400" />}
+                      Payment
+                    </span>
+                    <button
+                      onClick={() =>
+                        workflowMap[po.id]?.grnId
+                          ? navigate(`/grns/${workflowMap[po.id]?.grnId}?po=${po.id}`)
+                          : navigate(`/grns/new?po=${po.id}`)
+                      }
+                      className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700"
+                    >
+                      {workflowMap[po.id]?.grn ? 'Open GRN' : 'Create GRN'}
+                    </button>
+                    <button
+                      onClick={() =>
+                        workflowMap[po.id]?.invoiceId
+                          ? navigate(`/purchase/invoices?edit=${workflowMap[po.id]?.invoiceId}&po=${po.id}`)
+                          : workflowMap[po.id]?.grnId
+                            ? navigate(`/purchase/invoices?grn=${workflowMap[po.id]?.grnId}&po=${po.id}`)
+                            : navigate(`/purchase/invoices?po=${po.id}`)
+                      }
+                      className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700"
+                    >
+                      {workflowMap[po.id]?.invoice ? 'Open SI' : 'Create SI'}
+                    </button>
+                    <button
+                      onClick={() =>
+                        workflowMap[po.id]?.paymentId
+                          ? navigate(`/purchase/payments?edit=${workflowMap[po.id]?.paymentId}&po=${po.id}`)
+                          : workflowMap[po.id]?.invoiceId
+                            ? navigate(`/purchase/payments?invoice=${workflowMap[po.id]?.invoiceId}&po=${po.id}`)
+                            : navigate(`/purchase/payments?po=${po.id}`)
+                      }
+                      className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700"
+                    >
+                      {workflowMap[po.id]?.payment ? 'Open Payment' : 'Record Payment'}
+                    </button>
                     <button onClick={() => navigate(`/purchase-orders/${po.id}`)} className="text-blue-600 hover:text-blue-800"><Eye size={16} /></button>
                     <button onClick={() => setDeleteId(po.id)} className="text-red-600 hover:text-red-800"><Trash size={16} /></button>
                   </div>

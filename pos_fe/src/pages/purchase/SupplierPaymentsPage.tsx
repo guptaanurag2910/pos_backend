@@ -7,11 +7,15 @@ import {
   CheckCircle,
   XCircle,
   Edit,
+  Trash,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useSearchParams } from 'react-router-dom';
+import ProcurementFlowStepper from '../../components/purchase/ProcurementFlowStepper';
 import PaymentModal from '../../components/purchase/modals/PaymentModal';
 import {
   createSupplierPayment,
+  deleteSupplierPayment,
   listSupplierInvoices,
   listSupplierPayments,
   listSuppliers,
@@ -45,7 +49,8 @@ const normalizePayment = (payment: any) => ({
   supplierName: payment.supplier_name || '',
   supplierId: payment.supplier || null,
   purchaseOrderId: payment.purchase_order || null,
-  invoiceNumber: payment.po_number || 'Manual Entry',
+  supplierInvoiceId: payment.supplier_invoice || null,
+  invoiceNumber: payment.supplier_invoice_number || payment.po_number || 'Manual Entry',
   paymentDate: payment.payment_date,
   amount: toNumber(payment.amount),
   paymentMethod: apiToUiPaymentMethod(payment.payment_method),
@@ -75,6 +80,7 @@ const normalizeInvoice = (invoice: any) => {
 };
 
 const SupplierPaymentsPage = () => {
+  const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -84,6 +90,10 @@ const SupplierPaymentsPage = () => {
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [openInvoices, setOpenInvoices] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const mode = String(searchParams.get('mode') || '').toLowerCase();
+  const queryPoId = Number(searchParams.get('po'));
+  const queryInvoiceId = Number(searchParams.get('invoice'));
+  const queryPaymentId = Number(searchParams.get('edit'));
 
   const loadData = async () => {
     setIsLoading(true);
@@ -113,6 +123,47 @@ const SupplierPaymentsPage = () => {
     loadData();
   }, []);
 
+  useEffect(() => {
+    const editId = Number(searchParams.get('edit'));
+    if (Number.isInteger(editId) && editId > 0) {
+      return;
+    }
+
+    const invoiceId = String(searchParams.get('invoice') || '').trim();
+    const poId = Number(searchParams.get('po'));
+    if (!invoiceId && !(Number.isInteger(poId) && poId > 0)) {
+      return;
+    }
+
+    const matchedInvoice = openInvoices.find((invoice) => {
+      if (invoiceId && String(invoice.id) === invoiceId) return true;
+      if (Number.isInteger(poId) && poId > 0 && Number(invoice.purchaseOrderId) === poId) return true;
+      return false;
+    });
+
+    if (!matchedInvoice) return;
+
+    setSelectedInvoice({
+      id: String(matchedInvoice.id),
+      supplierName: matchedInvoice.supplierName,
+      grandTotal: matchedInvoice.grandTotal,
+      balanceAmount: matchedInvoice.balanceAmount,
+      invoiceNumber: matchedInvoice.invoiceNumber,
+      purchaseOrderId: matchedInvoice.purchaseOrderId,
+    });
+    setEditingPayment(null);
+    setShowPaymentModal(true);
+  }, [searchParams, openInvoices]);
+
+  useEffect(() => {
+    const editId = Number(searchParams.get('edit'));
+    if (!(Number.isInteger(editId) && editId > 0)) return;
+    if (showPaymentModal) return;
+    const payment = payments.find((p) => Number(p.id) === editId);
+    if (!payment) return;
+    handleEditPayment(payment);
+  }, [searchParams, payments, showPaymentModal]);
+
   const handleSavePayment = async (paymentData: any) => {
     try {
       const matchedSupplier = suppliers.find(
@@ -128,6 +179,7 @@ const SupplierPaymentsPage = () => {
       const payload = {
         supplier: matchedSupplier?.id || sourceInvoice?.supplierId || editingPayment?.supplierId,
         purchase_order: sourceInvoice?.purchaseOrderId || editingPayment?.purchaseOrderId || null,
+        supplier_invoice: sourceInvoice?.id || editingPayment?.supplierInvoiceId || null,
         amount: toNumber(paymentData.amount),
         payment_method: uiToApiPaymentMethod(paymentData.paymentMethod),
         reference_number: paymentData.referenceNumber || '',
@@ -175,6 +227,19 @@ const SupplierPaymentsPage = () => {
       status: payment.status,
     });
     setShowPaymentModal(true);
+  };
+
+  const handleDeletePayment = async (paymentId: number) => {
+    const ok = window.confirm('Soft delete this Supplier Payment?');
+    if (!ok) return;
+    try {
+      await deleteSupplierPayment(paymentId);
+      toast.success('Supplier payment deleted');
+      await loadData();
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error?.response?.data?.detail || 'Failed to delete supplier payment');
+    }
   };
 
   const handleNewPaymentForInvoice = () => {
@@ -261,6 +326,31 @@ const SupplierPaymentsPage = () => {
 
   return (
     <div className="space-y-6">
+      <ProcurementFlowStepper
+        currentStep={4}
+        steps={{
+          po: { done: mode !== 'direct_invoice' && mode !== 'direct_receipt', optional: true },
+          grn: { done: mode !== 'direct_invoice', optional: true },
+          pi: { done: true },
+          payment: { done: true },
+        }}
+        contextIds={{
+          poId:
+            selectedInvoice?.purchaseOrderId ||
+            editingPayment?.purchaseOrderId ||
+            (Number.isInteger(queryPoId) && queryPoId > 0 ? queryPoId : null),
+          invoiceId:
+            selectedInvoice?.id ? Number(selectedInvoice.id) : (
+              editingPayment?.supplierInvoiceId ||
+              (Number.isInteger(queryInvoiceId) && queryInvoiceId > 0 ? queryInvoiceId : null)
+            ),
+          paymentId:
+            editingPayment?.id ? Number(editingPayment.id) : (
+              Number.isInteger(queryPaymentId) && queryPaymentId > 0 ? queryPaymentId : null
+            ),
+        }}
+      />
+
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Supplier Payments</h1>
@@ -403,6 +493,12 @@ const SupplierPaymentsPage = () => {
                         className="text-primary-600 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-300"
                       >
                         <Edit size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleDeletePayment(Number(payment.id))}
+                        className="text-red-600 hover:text-red-800"
+                      >
+                        <Trash size={16} />
                       </button>
                     </td>
                   </tr>

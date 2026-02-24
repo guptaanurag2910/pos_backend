@@ -116,6 +116,90 @@ def _recalculate_invoice_payment_status(invoice):
             invoice.status = previous_status
     invoice.save(update_fields=['amount_paid', 'status', 'updated_at'])
 
+
+def _validate_invoice_payment_limit(invoice, amount, exclude_payment_id=None):
+    if not invoice:
+        return
+    base_qs = SupplierPayment.objects.filter(
+        supplier_invoice=invoice,
+        status='completed',
+        is_active=True
+    )
+    if exclude_payment_id:
+        base_qs = base_qs.exclude(id=exclude_payment_id)
+    already_paid = base_qs.aggregate(total=models.Sum('amount')).get('total') or Decimal('0')
+    if already_paid + amount > invoice.grand_total:
+        raise ValidationError({
+            "amount": (
+                f"Payment exceeds invoice due amount. Due: {invoice.grand_total - already_paid}, "
+                f"attempted: {amount}."
+            )
+        })
+
+
+def _complete_grn_and_update_inventory(grn, actor):
+    from inventory.models import StockRecord, StockLevel
+
+    # Idempotency guard: if purchase stock records already exist for this GRN, skip stock posting.
+    already_posted = StockRecord.objects.filter(
+        record_type='purchase',
+        reference_id=grn.grn_number,
+        store=grn.store
+    ).exists()
+
+    if not already_posted:
+        for item in grn.items.all():
+            StockRecord.objects.create(
+                product=item.product,
+                store=grn.store,
+                quantity=item.quantity,
+                record_type='purchase',
+                reference_id=grn.grn_number,
+                batch_number=item.batch_number,
+                expiry_date=item.expiry_date,
+                created_by=actor
+            )
+
+            stock_level, _ = StockLevel.objects.get_or_create(
+                product=item.product,
+                store=grn.store,
+                batch_number=item.batch_number,
+                defaults={
+                    'quantity': 0,
+                    'expiry_date': item.expiry_date
+                }
+            )
+            stock_level.quantity += item.quantity
+            if not stock_level.expiry_date and item.expiry_date:
+                stock_level.expiry_date = item.expiry_date
+            stock_level.save()
+
+            product = item.product
+            if product.cost_price != item.unit_price:
+                product.cost_price = item.unit_price
+                product.save(update_fields=['cost_price', 'updated_at'])
+
+    if grn.status != 'completed':
+        grn.status = 'completed'
+        grn.save(update_fields=['status', 'updated_at'])
+
+    if grn.purchase_order:
+        po = grn.purchase_order
+        all_received = True
+        for po_item in po.items.all():
+            received_qty = GoodsReceiptNoteItem.objects.filter(
+                grn__purchase_order=po,
+                grn__status='completed',
+                product=po_item.product
+            ).aggregate(total=models.Sum('quantity')).get('total') or Decimal('0')
+            po_item.quantity_received = received_qty
+            po_item.save(update_fields=['quantity_received'])
+            if received_qty < po_item.quantity_ordered:
+                all_received = False
+
+        po.status = 'received' if all_received else 'partially_received'
+        po.save(update_fields=['status', 'updated_at'])
+
 class SupplierViewSet(viewsets.ModelViewSet):
     queryset = Supplier.objects.all()
     serializer_class = SupplierSerializer
@@ -367,6 +451,7 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
+        was_completed = instance.status == 'completed'
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
 
@@ -432,6 +517,8 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
             instance.calculate_totals()
             if instance.purchase_order:
                 instance.purchase_order.calculate_totals()
+            if instance.status == 'completed' and not was_completed:
+                _complete_grn_and_update_inventory(instance, request.user)
 
         return Response(self.get_serializer(instance).data)
 
@@ -439,76 +526,9 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
     def complete(self, request, pk=None):
         grn = self.get_object()
         logger.info(f"grn_complete_requested actor_id={request.user.id} grn_id={grn.id}")
-        
-        if grn.status == 'completed':
-            return Response(
-                {"detail": "GRN is already completed"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
+
         with transaction.atomic():
-            # Update GRN status
-            grn.status = 'completed'
-            grn.save()
-            
-            # Update purchase order status if applicable
-            if grn.purchase_order:
-                po = grn.purchase_order
-                
-                # Check if all items have been received
-                all_received = True
-                for po_item in po.items.all():
-                    received_qty = GoodsReceiptNoteItem.objects.filter(
-                        grn__purchase_order=po,
-                        product=po_item.product
-                    ).aggregate(total=models.Sum('quantity'))['total'] or 0
-                    
-                    po_item.quantity_received = received_qty
-                    po_item.save()
-                    
-                    if received_qty < po_item.quantity_ordered:
-                        all_received = False
-                
-                po.status = 'received' if all_received else 'partially_received'
-                po.save()
-            
-            # Update inventory
-            from inventory.models import StockRecord, StockLevel
-            
-            for item in grn.items.all():
-                # Create stock record
-                StockRecord.objects.create(
-                    product=item.product,
-                    store=grn.store,
-                    quantity=item.quantity,
-                    record_type='purchase',
-                    reference_id=grn.grn_number,
-                    batch_number=item.batch_number,
-                    expiry_date=item.expiry_date,
-                    created_by=request.user
-                )
-                
-                # Update stock level
-                stock_level, created = StockLevel.objects.get_or_create(
-                    product=item.product,
-                    store=grn.store,
-                    batch_number=item.batch_number,
-                    defaults={
-                        'quantity': 0,
-                        'expiry_date': item.expiry_date
-                    }
-                )
-                
-                stock_level.quantity += item.quantity
-                if not stock_level.expiry_date and item.expiry_date:
-                    stock_level.expiry_date = item.expiry_date
-                stock_level.save()
-                
-                # Update product cost price if needed
-                product = item.product
-                if product.cost_price != item.unit_price:
-                    product.cost_price = item.unit_price
-                    product.save()
+            _complete_grn_and_update_inventory(grn, request.user)
             
             # Log the action
             AuditLog.objects.create(
@@ -605,6 +625,8 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
             grn.calculate_totals()
             if grn.purchase_order:
                 grn.purchase_order.calculate_totals()
+            if grn.status == 'completed':
+                _complete_grn_and_update_inventory(grn, self.request.user)
 
             # Audit log
             AuditLog.objects.create(
@@ -855,9 +877,10 @@ class SupplierPaymentViewSet(viewsets.ModelViewSet):
         else:
             if not getattr(user, 'store', None):
                 return SupplierPayment.objects.none()
-            # For managers, show payments for purchases from their store
+            # For managers/cashiers, show store-scoped PO and invoice payments.
             qs = SupplierPayment.objects.filter(
-                Q(purchase_order__store=user.store) | 
+                Q(purchase_order__store=user.store) |
+                Q(supplier_invoice__store=user.store) |
                 Q(purchase_order__isnull=True, created_by=user)
             )
         if not include_inactive:
@@ -866,7 +889,20 @@ class SupplierPaymentViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         with transaction.atomic():
+            invoice = serializer.validated_data.get('supplier_invoice')
+            payment_status = serializer.validated_data.get('status')
+            amount = _to_decimal(serializer.validated_data.get('amount', 0))
+            if invoice and payment_status == 'completed':
+                _validate_invoice_payment_limit(invoice, amount)
+
             payment = serializer.save(created_by=self.request.user)
+
+            if payment.supplier:
+                _recalculate_supplier_payment_effects(payment.supplier)
+            if payment.purchase_order:
+                _recalculate_po_payment_status(payment.purchase_order)
+            if payment.supplier_invoice:
+                _recalculate_invoice_payment_status(payment.supplier_invoice)
             logger.info(f"supplier_payment_create_completed actor_id={self.request.user.id} payment_id={payment.id} amount={payment.amount}")
             
             # Log the action
@@ -877,6 +913,45 @@ class SupplierPaymentViewSet(viewsets.ModelViewSet):
                 object_id=str(payment.id),
                 object_repr=str(payment),
                 ip_address=get_client_ip(self.request)
+            )
+
+    def perform_update(self, serializer):
+        with transaction.atomic():
+            old_payment = SupplierPayment.objects.select_related('supplier', 'purchase_order', 'supplier_invoice').get(
+                id=serializer.instance.id
+            )
+            old_supplier = old_payment.supplier
+            old_po = old_payment.purchase_order
+            old_invoice = old_payment.supplier_invoice
+
+            new_invoice = serializer.validated_data.get('supplier_invoice', old_invoice)
+            new_status = serializer.validated_data.get('status', old_payment.status)
+            new_amount = _to_decimal(serializer.validated_data.get('amount', old_payment.amount))
+            if new_invoice and new_status == 'completed':
+                _validate_invoice_payment_limit(new_invoice, new_amount, exclude_payment_id=old_payment.id)
+
+            payment = serializer.save()
+
+            related_suppliers = {obj for obj in [old_supplier, payment.supplier] if obj is not None}
+            for supplier in related_suppliers:
+                _recalculate_supplier_payment_effects(supplier)
+
+            related_pos = {obj for obj in [old_po, payment.purchase_order] if obj is not None}
+            for po in related_pos:
+                _recalculate_po_payment_status(po)
+
+            related_invoices = {obj for obj in [old_invoice, payment.supplier_invoice] if obj is not None}
+            for invoice in related_invoices:
+                _recalculate_invoice_payment_status(invoice)
+
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='update',
+                model_name='SupplierPayment',
+                object_id=str(payment.id),
+                object_repr=str(payment),
+                ip_address=get_client_ip(self.request),
+                details={'action': 'payment_update'}
             )
 
     def perform_destroy(self, instance):

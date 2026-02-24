@@ -1,4 +1,5 @@
 import logging
+import io
 
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
@@ -12,6 +13,7 @@ from django.db.models import Sum, F
 from django.utils import timezone
 from decimal import Decimal, InvalidOperation
 import csv
+import pandas as pd
 
 from .models import (
     Category, Product, StockRecord, StockLevel,
@@ -25,6 +27,7 @@ from .serializers import (
 from accounts.permissions import IsAdminUser, IsManagerUser
 from accounts.models import AuditLog
 from accounts.utils import get_client_ip
+from stores.models import Store
 
 logger = logging.getLogger('inventory')
 
@@ -109,6 +112,16 @@ class ProductViewSet(viewsets.ModelViewSet):
         else:
             queryset = queryset.annotate(current_stock=Sum('stock_levels__quantity'))
 
+        in_stock_only = str(self.request.query_params.get('in_stock_only', '')).lower() in ['1', 'true', 'yes']
+        if in_stock_only:
+            queryset = queryset.filter(current_stock__gt=0)
+
+        stock_status = str(self.request.query_params.get('stock_status', '')).lower()
+        if stock_status == 'in_stock':
+            queryset = queryset.filter(current_stock__gt=0)
+        elif stock_status == 'out_of_stock':
+            queryset = queryset.filter(models.Q(current_stock__lte=0) | models.Q(current_stock__isnull=True))
+
         return queryset
     
     def get_permissions(self):
@@ -117,6 +130,132 @@ class ProductViewSet(viewsets.ModelViewSet):
         else:
             permission_classes = [IsAuthenticated]
         return [permission() for permission in permission_classes]
+
+    def _parse_decimal(self, value, field_name):
+        if value is None or value == '':
+            return None
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            raise ValidationError({field_name: f"{field_name} must be a valid number"})
+
+    def _resolve_store_for_stock(self, explicit_store_id=None):
+        if explicit_store_id:
+            store = Store.objects.filter(id=explicit_store_id, is_active=True).first()
+            if not store:
+                raise ValidationError({"store": "Invalid or inactive store"})
+            return store
+
+        user_store = getattr(self.request.user, 'store', None)
+        if user_store:
+            return user_store
+
+        fallback = Store.objects.filter(is_main=True, is_active=True).first()
+        if fallback:
+            return fallback
+        return Store.objects.filter(is_active=True).order_by('id').first()
+
+    def _resolve_store_for_inventory_io(self, explicit_store_id=None):
+        store = self._resolve_store_for_stock(explicit_store_id)
+        if not store:
+            raise ValidationError({"store": "No active store available"})
+        return store
+
+    def _extract_stock_entries(self):
+        payload = self.request.data
+        if not hasattr(payload, 'get'):
+            return []
+
+        entries = []
+        raw_entries = payload.get('stock_details')
+        if isinstance(raw_entries, list):
+            for row in raw_entries:
+                if isinstance(row, dict):
+                    entries.append(row)
+        else:
+            quantity = payload.get('quantity', payload.get('stock_quantity', payload.get('initial_stock')))
+            min_stock = payload.get('min_stock')
+            max_stock = payload.get('max_stock')
+            batch_number = payload.get('batch_number')
+            expiry_date = payload.get('expiry_date')
+            store_id = payload.get('store')
+
+            has_stock_values = any(
+                value not in [None, '']
+                for value in [quantity, min_stock, max_stock, batch_number, expiry_date, store_id]
+            )
+            if has_stock_values:
+                entries.append({
+                    'quantity': quantity,
+                    'min_stock': min_stock,
+                    'max_stock': max_stock,
+                    'batch_number': batch_number,
+                    'expiry_date': expiry_date,
+                    'store': store_id,
+                })
+        return entries
+
+    def _apply_stock_entries(self, product, entries):
+        applied = []
+        for idx, entry in enumerate(entries, start=1):
+            quantity = self._parse_decimal(entry.get('quantity', entry.get('stock_quantity')), 'quantity')
+            min_stock = self._parse_decimal(entry.get('min_stock'), 'min_stock')
+            max_stock = self._parse_decimal(entry.get('max_stock'), 'max_stock')
+            batch_number = entry.get('batch_number') or None
+            expiry_date = entry.get('expiry_date') or None
+            store = self._resolve_store_for_stock(entry.get('store'))
+            if not store:
+                raise ValidationError({"store": "No active store available for stock update"})
+
+            stock_level, _ = StockLevel.objects.get_or_create(
+                product=product,
+                store=store,
+                batch_number=batch_number,
+                defaults={'quantity': 0, 'expiry_date': expiry_date}
+            )
+
+            old_quantity = Decimal(str(stock_level.quantity))
+            if quantity is not None and quantity < 0:
+                raise ValidationError({"quantity": "quantity cannot be negative"})
+            if min_stock is not None and min_stock < 0:
+                raise ValidationError({"min_stock": "min_stock cannot be negative"})
+            if max_stock is not None and max_stock < 0:
+                raise ValidationError({"max_stock": "max_stock cannot be negative"})
+
+            if quantity is not None:
+                stock_level.quantity = quantity
+            if min_stock is not None:
+                stock_level.min_stock = min_stock
+            if max_stock is not None:
+                stock_level.max_stock = max_stock
+            if expiry_date:
+                stock_level.expiry_date = expiry_date
+            stock_level.save()
+
+            new_quantity = Decimal(str(stock_level.quantity))
+            delta = new_quantity - old_quantity
+            if delta != 0:
+                StockRecord.objects.create(
+                    product=product,
+                    store=store,
+                    quantity=delta,
+                    record_type='adjustment',
+                    reference_id=f'PRODUCT-{product.id}',
+                    batch_number=batch_number,
+                    expiry_date=expiry_date,
+                    notes='Product create/update stock set',
+                    created_by=self.request.user
+                )
+
+            applied.append({
+                'index': idx,
+                'store_id': store.id,
+                'batch_number': batch_number,
+                'old_quantity': str(old_quantity),
+                'new_quantity': str(new_quantity),
+                'delta': str(delta),
+            })
+        return applied
     
     @action(detail=True, methods=['get'])
     def stock_levels(self, request, pk=None):
@@ -202,6 +341,301 @@ class ProductViewSet(viewsets.ModelViewSet):
             
         serializer = StockRecordSerializer(record)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'])
+    def export_inventory_sheet(self, request):
+        """
+        Export product + stock snapshot for a store in a single-sheet Excel.
+        """
+        store = self._resolve_store_for_inventory_io(request.query_params.get('store'))
+        logger.info(f"inventory_export_requested actor_id={request.user.id} store_id={store.id}")
+
+        rows = []
+        products = Product.objects.select_related('category').order_by('name')
+        for product in products:
+            stock = StockLevel.objects.filter(store=store, product=product).order_by('id').first()
+            rows.append({
+                'barcode': product.barcode,
+                'product_name': product.name,
+                'category': product.category.name if product.category else '',
+                'description': product.description or '',
+                'price': product.price,
+                'cost_price': product.cost_price,
+                'discount_price': product.discount_price if product.discount_price is not None else '',
+                'tax': product.tax,
+                'hsn_code': product.hsn_code or '',
+                'unit': product.unit or '',
+                'weight': product.weight if product.weight is not None else '',
+                'is_active': product.is_active,
+                'is_featured': product.is_featured,
+                'is_service': product.is_service,
+                'batch_number': stock.batch_number if stock and stock.batch_number else '',
+                'expiry_date': stock.expiry_date.isoformat() if stock and stock.expiry_date else '',
+                'quantity': stock.quantity if stock else Decimal('0'),
+                'min_stock': stock.min_stock if stock else Decimal('0'),
+                'max_stock': stock.max_stock if stock and stock.max_stock is not None else '',
+            })
+
+        if not rows:
+            rows = [{
+                'barcode': '',
+                'product_name': '',
+                'category': '',
+                'description': '',
+                'price': '',
+                'cost_price': '',
+                'discount_price': '',
+                'tax': '',
+                'hsn_code': '',
+                'unit': '',
+                'weight': '',
+                'is_active': True,
+                'is_featured': False,
+                'is_service': False,
+                'batch_number': '',
+                'expiry_date': '',
+                'quantity': '',
+                'min_stock': '',
+                'max_stock': '',
+            }]
+
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            pd.DataFrame(rows).to_excel(writer, index=False, sheet_name='inventory')
+        output.seek(0)
+
+        from django.http import HttpResponse
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = (
+            f'attachment; filename="inventory_store_{store.code}_{timezone.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
+        )
+        logger.info(f"inventory_export_completed actor_id={request.user.id} store_id={store.id} rows={len(rows)}")
+        return response
+
+    @action(detail=False, methods=['post'], parser_classes=[MultiPartParser, FormParser])
+    def import_inventory_sheet(self, request):
+        """
+        Import single-sheet inventory and override stock snapshot for selected store.
+        Expected columns: barcode, product_name, category, description, price, cost_price, discount_price,
+        tax, hsn_code, unit, weight, is_active, is_featured, is_service, batch_number, expiry_date,
+        quantity, min_stock, max_stock
+        """
+        upload = request.FILES.get('file')
+        if not upload:
+            return Response({"detail": "file is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        upload_entry = InventoryUpload.objects.create(file=upload)
+
+        override = str(request.data.get('override', 'true')).lower() != 'false'
+        store = self._resolve_store_for_inventory_io(request.data.get('store'))
+        logger.info(
+            f"inventory_import_requested actor_id={request.user.id} store_id={store.id} "
+            f"override={override} filename={upload.name} upload_id={upload_entry.id}"
+        )
+
+        try:
+            df = pd.read_excel(upload_entry.file, sheet_name=0)
+        except Exception as e:
+            return Response(
+                {
+                    "detail": f"Unable to read Excel file: {e}",
+                    "upload": InventoryUploadSerializer(upload_entry).data,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        required_cols = {'barcode', 'product_name', 'price', 'cost_price', 'tax', 'quantity'}
+        normalized_cols = {str(c).strip() for c in df.columns}
+        missing = [c for c in required_cols if c not in normalized_cols]
+        if missing:
+            return Response({"detail": f"Missing required columns: {', '.join(missing)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Normalize column names and values
+        df.columns = [str(c).strip() for c in df.columns]
+        df = df.fillna('')
+
+        processed = 0
+        created_products = 0
+        updated_products = 0
+        created_stock_levels = 0
+        updated_stock_levels = 0
+        errors = []
+        seen_stock_keys = set()
+        ref_id = f"INV-IMPORT-{timezone.now().strftime('%Y%m%d%H%M%S')}"
+
+        for idx, row in df.iterrows():
+            line = idx + 2
+            try:
+                with transaction.atomic():
+                    barcode = str(row.get('barcode', '')).strip()
+                    product_name = str(row.get('product_name', '')).strip()
+                    if not barcode or not product_name:
+                        continue
+
+                    category_name = str(row.get('category', '')).strip()
+                    category = None
+                    if category_name:
+                        slug = category_name.lower().replace(' ', '-')
+                        category, _ = Category.objects.get_or_create(
+                            slug=slug,
+                            defaults={'name': category_name, 'is_active': True}
+                        )
+                        if category.name != category_name:
+                            category.name = category_name
+                            category.save(update_fields=['name'])
+
+                    price = Decimal(str(row.get('price', 0) or 0))
+                    cost_price = Decimal(str(row.get('cost_price', 0) or 0))
+                    discount_price_raw = str(row.get('discount_price', '')).strip()
+                    discount_price = Decimal(discount_price_raw) if discount_price_raw else None
+                    tax = int(float(row.get('tax', 0) or 0))
+                    tax = min([0, 5, 12, 18, 28], key=lambda x: abs(x - tax))
+                    quantity = Decimal(str(row.get('quantity', 0) or 0))
+                    min_stock = Decimal(str(row.get('min_stock', 0) or 0))
+                    max_stock_raw = str(row.get('max_stock', '')).strip()
+                    max_stock = Decimal(max_stock_raw) if max_stock_raw else None
+                    batch_number = str(row.get('batch_number', '')).strip() or None
+                    expiry_date = str(row.get('expiry_date', '')).strip() or None
+
+                    product = Product.objects.filter(barcode=barcode).first()
+                    if not product:
+                        product = Product.objects.create(
+                            name=product_name[:255],
+                            barcode=barcode[:20],
+                            category=category,
+                            description=str(row.get('description', '')).strip() or None,
+                            price=price,
+                            cost_price=cost_price,
+                            discount_price=discount_price,
+                            tax=tax,
+                            hsn_code=str(row.get('hsn_code', '')).strip() or None,
+                            unit=str(row.get('unit', '')).strip() or 'piece',
+                            weight=Decimal(str(row.get('weight', 0) or 0)) if str(row.get('weight', '')).strip() else None,
+                            is_active=str(row.get('is_active', 'true')).lower() not in ['false', '0', 'no'],
+                            is_featured=str(row.get('is_featured', 'false')).lower() in ['true', '1', 'yes'],
+                            is_service=str(row.get('is_service', 'false')).lower() in ['true', '1', 'yes'],
+                        )
+                        created_products += 1
+                    else:
+                        product.name = product_name[:255]
+                        product.category = category
+                        product.description = str(row.get('description', '')).strip() or None
+                        product.price = price
+                        product.cost_price = cost_price
+                        product.discount_price = discount_price
+                        product.tax = tax
+                        product.hsn_code = str(row.get('hsn_code', '')).strip() or None
+                        product.unit = str(row.get('unit', '')).strip() or 'piece'
+                        product.weight = Decimal(str(row.get('weight', 0) or 0)) if str(row.get('weight', '')).strip() else None
+                        product.is_active = str(row.get('is_active', 'true')).lower() not in ['false', '0', 'no']
+                        product.is_featured = str(row.get('is_featured', 'false')).lower() in ['true', '1', 'yes']
+                        product.is_service = str(row.get('is_service', 'false')).lower() in ['true', '1', 'yes']
+                        product.save()
+                        updated_products += 1
+
+                    stock_level, created = StockLevel.objects.get_or_create(
+                        product=product,
+                        store=store,
+                        batch_number=batch_number,
+                        defaults={'quantity': 0, 'min_stock': 0, 'max_stock': max_stock, 'expiry_date': expiry_date}
+                    )
+                    old_qty = Decimal(str(stock_level.quantity))
+                    stock_level.quantity = quantity
+                    stock_level.min_stock = min_stock
+                    stock_level.max_stock = max_stock
+                    if expiry_date:
+                        stock_level.expiry_date = expiry_date
+                    stock_level.save()
+                    if created:
+                        created_stock_levels += 1
+                    else:
+                        updated_stock_levels += 1
+
+                    delta = quantity - old_qty
+                    if delta != 0:
+                        StockRecord.objects.create(
+                            product=product,
+                            store=store,
+                            quantity=delta,
+                            record_type='adjustment',
+                            reference_id=ref_id,
+                            batch_number=batch_number,
+                            expiry_date=expiry_date,
+                            notes='Inventory sheet import override',
+                            created_by=request.user
+                        )
+
+                    seen_stock_keys.add((product.id, batch_number or ''))
+                    processed += 1
+            except Exception as e:
+                errors.append({'line': line, 'error': str(e)})
+
+        if override:
+            remaining_levels = StockLevel.objects.filter(store=store).select_related('product')
+            for level in remaining_levels:
+                key = (level.product_id, level.batch_number or '')
+                if key in seen_stock_keys:
+                    continue
+                old_qty = Decimal(str(level.quantity))
+                if old_qty == 0:
+                    continue
+                try:
+                    with transaction.atomic():
+                        level.quantity = 0
+                        level.save(update_fields=['quantity', 'updated_at'])
+                        StockRecord.objects.create(
+                            product=level.product,
+                            store=store,
+                            quantity=-old_qty,
+                            record_type='adjustment',
+                            reference_id=ref_id,
+                            batch_number=level.batch_number,
+                            expiry_date=level.expiry_date,
+                            notes='Inventory sheet override reset',
+                            created_by=request.user
+                        )
+                except Exception as e:
+                    errors.append({
+                        'line': 'override',
+                        'product_id': level.product_id,
+                        'batch_number': level.batch_number or '',
+                        'error': str(e),
+                    })
+
+        AuditLog.objects.create(
+            user=request.user,
+            action='update',
+            model_name='InventoryImport',
+            object_id=str(store.id),
+            object_repr=f"Store {store.code} inventory import",
+            ip_address=get_client_ip(request),
+            details={
+                'upload_id': upload_entry.id,
+                'override': override,
+                'processed': processed,
+                'errors': len(errors),
+                'created_products': created_products,
+                'updated_products': updated_products,
+                'created_stock_levels': created_stock_levels,
+                'updated_stock_levels': updated_stock_levels,
+            }
+        )
+
+        logger.info(f"inventory_import_completed actor_id={request.user.id} store_id={store.id} processed={processed} errors={len(errors)}")
+        return Response({
+            'upload': InventoryUploadSerializer(upload_entry).data,
+            'store_id': store.id,
+            'override': override,
+            'processed': processed,
+            'created_products': created_products,
+            'updated_products': updated_products,
+            'created_stock_levels': created_stock_levels,
+            'updated_stock_levels': updated_stock_levels,
+            'errors': errors,
+        }, status=status.HTTP_207_MULTI_STATUS if errors else status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'])
     def bulk_adjust_stock(self, request):
@@ -290,28 +724,36 @@ class ProductViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_207_MULTI_STATUS if errors else status.HTTP_200_OK)
     
     def perform_create(self, serializer):
-        product = serializer.save()
-        logger.info(f"product_create_completed actor_id={self.request.user.id} product_id={product.id}")
-        AuditLog.objects.create(
-            user=self.request.user,
-            action='create',
-            model_name='Product',
-            object_id=str(product.id),
-            object_repr=product.name,
-            ip_address=get_client_ip(self.request)
-        )
+        with transaction.atomic():
+            product = serializer.save()
+            stock_entries = self._extract_stock_entries()
+            applied_stock = self._apply_stock_entries(product, stock_entries) if stock_entries else []
+            logger.info(f"product_create_completed actor_id={self.request.user.id} product_id={product.id} stock_entries={len(applied_stock)}")
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='create',
+                model_name='Product',
+                object_id=str(product.id),
+                object_repr=product.name,
+                ip_address=get_client_ip(self.request),
+                details={'stock_entries': applied_stock}
+            )
     
     def perform_update(self, serializer):
-        product = serializer.save()
-        logger.info(f"product_update_completed actor_id={self.request.user.id} product_id={product.id}")
-        AuditLog.objects.create(
-            user=self.request.user,
-            action='update',
-            model_name='Product',
-            object_id=str(product.id),
-            object_repr=product.name,
-            ip_address=get_client_ip(self.request)
-        )
+        with transaction.atomic():
+            product = serializer.save()
+            stock_entries = self._extract_stock_entries()
+            applied_stock = self._apply_stock_entries(product, stock_entries) if stock_entries else []
+            logger.info(f"product_update_completed actor_id={self.request.user.id} product_id={product.id} stock_entries={len(applied_stock)}")
+            AuditLog.objects.create(
+                user=self.request.user,
+                action='update',
+                model_name='Product',
+                object_id=str(product.id),
+                object_repr=product.name,
+                ip_address=get_client_ip(self.request),
+                details={'stock_entries': applied_stock}
+            )
     
     def perform_destroy(self, instance):
         logger.info(f"product_soft_delete_requested actor_id={self.request.user.id} product_id={instance.id}")

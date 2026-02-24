@@ -3,12 +3,13 @@ import { Product } from '../../types';
 
 interface ProductTableProps {
   products: Product[];
+  onView: (product: Product) => void;
   onEdit: (product: Product) => void;
   onDelete: (id: number) => void;
   onAdjustStock: (productId: number, storeId: number, quantity: number) => void;
 }
 
-const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete }) => {
+const ProductTable: React.FC<ProductTableProps> = ({ products, onView, onEdit, onDelete }) => {
   return (
     <div className="overflow-x-auto border rounded dark:border-gray-700">
       <table className="min-w-full bg-white dark:bg-gray-900 dark:text-gray-200">
@@ -29,7 +30,9 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete 
             const stockInfo = product.stock_details?.[0];
             const stockQty = Number(product.current_stock ?? 0);
             const minStock = Number(stockInfo?.min_stock ?? 0);
-            const statusText = stockQty <= minStock ? 'Low stock' : 'In stock';
+            const statusText = stockQty <= 0 ? 'Out of stock' : stockQty <= minStock ? 'Low stock' : 'In stock';
+            const statusClass =
+              stockQty <= 0 ? 'text-red-700' : stockQty <= minStock ? 'text-amber-600' : 'text-green-600';
 
             return (
               <tr key={product.id} className="border-b dark:border-gray-700 text-sm">
@@ -70,15 +73,15 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete 
                   <span className="text-xs text-gray-500 dark:text-gray-400">Min: {minStock}</span>
                 </td>
                 <td className="px-4 py-2 text-center">
-                  <span
-                    className={`text-sm font-medium ${
-                      stockQty <= minStock ? 'text-red-600' : 'text-green-600'
-                    }`}
-                  >
-                    {statusText}
-                  </span>
+                  <span className={`text-sm font-medium ${statusClass}`}>{statusText}</span>
                 </td>
                 <td className="px-4 py-2 text-right space-x-2">
+                  <button
+                    onClick={() => onView(product)}
+                    className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
+                  >
+                    View
+                  </button>
                   <button
                     onClick={() => onEdit(product)}
                     className="bg-yellow-400 text-white px-3 py-1 rounded hover:bg-yellow-500"
@@ -87,9 +90,9 @@ const ProductTable: React.FC<ProductTableProps> = ({ products, onEdit, onDelete 
                   </button>
                   <button
                     onClick={() => onDelete(product.id)}
-                    className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
+                    className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700"
                   >
-                    View
+                    Delete
                   </button>
                 </td>
               </tr>

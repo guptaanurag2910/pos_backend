@@ -192,6 +192,11 @@ export const updateSupplierPayment = async (id: number, data: any) => {
   return res.data;
 };
 
+export const partialUpdateSupplierPayment = async (id: number, data: any) => {
+  const res = await axiosInstance.patch(`${SUPPLIER_BASE_URL}payments/${id}/`, data);
+  return res.data;
+};
+
 export const deleteSupplierPayment = async (id: number) => {
   return axiosInstance.delete(`${SUPPLIER_BASE_URL}payments/${id}/`);
 };

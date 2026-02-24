@@ -6,19 +6,21 @@ import {
   Clock,
   CheckCircle,
   XCircle,
-  Edit,
+  Eye,
   Trash,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useSearchParams } from 'react-router-dom';
 import ProcurementFlowStepper from '../../components/purchase/ProcurementFlowStepper';
 import PaymentModal from '../../components/purchase/modals/PaymentModal';
+import DeleteConfirmModal from '../../components/common/DeleteConfirmModal';
 import {
   createSupplierPayment,
   deleteSupplierPayment,
   listSupplierInvoices,
   listSupplierPayments,
   listSuppliers,
+  partialUpdateSupplierPayment,
   updateSupplierPayment,
 } from '../../service/purchaseService';
 
@@ -86,6 +88,7 @@ const SupplierPaymentsPage = () => {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [editingPayment, setEditingPayment] = useState<any>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
+  const [deletePaymentId, setDeletePaymentId] = useState<number | null>(null);
   const [payments, setPayments] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [openInvoices, setOpenInvoices] = useState<any[]>([]);
@@ -217,8 +220,11 @@ const SupplierPaymentsPage = () => {
     setEditingPayment({
       id: String(payment.id),
       paymentNumber: payment.paymentNumber,
-      invoiceId: '',
+      invoiceId: payment.supplierInvoiceId ? String(payment.supplierInvoiceId) : '',
       supplierName: payment.supplierName,
+      supplierId: payment.supplierId || null,
+      purchaseOrderId: payment.purchaseOrderId || null,
+      supplierInvoiceId: payment.supplierInvoiceId || null,
       paymentDate: payment.paymentDate,
       amount: payment.amount,
       paymentMethod: payment.paymentMethod,
@@ -230,8 +236,6 @@ const SupplierPaymentsPage = () => {
   };
 
   const handleDeletePayment = async (paymentId: number) => {
-    const ok = window.confirm('Soft delete this Supplier Payment?');
-    if (!ok) return;
     try {
       await deleteSupplierPayment(paymentId);
       toast.success('Supplier payment deleted');
@@ -239,6 +243,19 @@ const SupplierPaymentsPage = () => {
     } catch (error: any) {
       console.error(error);
       toast.error(error?.response?.data?.detail || 'Failed to delete supplier payment');
+    } finally {
+      setDeletePaymentId(null);
+    }
+  };
+
+  const handleCompletePayment = async (paymentId: number) => {
+    try {
+      await partialUpdateSupplierPayment(paymentId, { status: 'completed' });
+      toast.success('Payment marked as completed');
+      await loadData();
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error?.response?.data?.detail || 'Failed to complete payment');
     }
   };
 
@@ -488,18 +505,34 @@ const SupplierPaymentsPage = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button
-                        onClick={() => handleEditPayment(payment)}
-                        className="text-primary-600 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-300"
-                      >
-                        <Edit size={16} />
-                      </button>
-                      <button
-                        onClick={() => handleDeletePayment(Number(payment.id))}
-                        className="text-red-600 hover:text-red-800"
-                      >
-                        <Trash size={16} />
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleCompletePayment(Number(payment.id))}
+                          disabled={payment.status === 'completed'}
+                          title={payment.status === 'completed' ? 'Already completed' : 'Mark as completed'}
+                          className={`rounded border p-2 ${
+                            payment.status === 'completed'
+                              ? 'cursor-not-allowed border-green-300 bg-green-50 text-green-700'
+                              : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                          }`}
+                        >
+                          <CheckCircle size={16} />
+                        </button>
+                        <button
+                          onClick={() => handleEditPayment(payment)}
+                          title="View Payment"
+                          className="rounded border border-blue-200 bg-blue-50 p-2 text-blue-700 hover:bg-blue-100"
+                        >
+                          <Eye size={16} />
+                        </button>
+                        <button
+                          onClick={() => setDeletePaymentId(Number(payment.id))}
+                          title="Delete Payment"
+                          className="rounded border border-red-200 bg-red-50 p-2 text-red-700 hover:bg-red-100"
+                        >
+                          <Trash size={16} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -519,6 +552,15 @@ const SupplierPaymentsPage = () => {
         onSave={handleSavePayment}
         initialData={editingPayment}
         invoiceData={selectedInvoice}
+      />
+      <DeleteConfirmModal
+        isOpen={deletePaymentId !== null}
+        title="Delete Supplier Payment"
+        message="Soft delete this supplier payment?"
+        onCancel={() => setDeletePaymentId(null)}
+        onConfirm={() => {
+          if (deletePaymentId !== null) handleDeletePayment(deletePaymentId);
+        }}
       />
     </div>
   );

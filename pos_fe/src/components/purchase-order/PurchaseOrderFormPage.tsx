@@ -214,15 +214,11 @@ const PurchaseOrderFormPage = ({ poId }: Props) => {
       if (poId) {
         await updatePurchaseOrder(poId, payload);
         toast.success('Purchase order updated');
-        navigate(`/purchase-orders/${poId}`);
+        navigate('/purchase/orders');
       } else {
         const created = await createPurchaseOrder(payload);
         toast.success('Purchase order created');
-        if (created?.id) {
-          navigate(`/purchase-orders/${created.id}`);
-        } else {
-          navigate('/purchase/orders');
-        }
+        navigate('/purchase/orders');
       }
     } catch (err) {
       console.error(err);

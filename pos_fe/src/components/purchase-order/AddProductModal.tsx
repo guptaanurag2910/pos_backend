@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { listProducts } from '../../service/inventoryService';
+import { createProduct, listCategories, listProducts } from '../../service/inventoryService';
+import { listStores } from '../../service/storeService';
 import ProductModal from './../inventory/ProductModal';
 import { Product } from '../types';
 
@@ -24,7 +25,7 @@ interface AddProductModalProps {
 
 const AddProductModal = ({ onSave, onClose, initialData }: AddProductModalProps) => {
   const [formData, setFormData] = useState<Item>({
-    product_id: Date.now(),
+    product_id: 0,
     product_name: '',
     quantity_ordered: 1,
     unit_price: 0,
@@ -35,14 +36,28 @@ const AddProductModal = ({ onSave, onClose, initialData }: AddProductModalProps)
 
   const [products, setProducts] = useState<Product[]>([]);
   const [showProductModal, setShowProductModal] = useState(false);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [stores, setStores] = useState<Array<{ id: number; name: string }>>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(true);
   const [discountAmount, setDiscountAmount] = useState(0);
   const [taxAmount, setTaxAmount] = useState(0);
   const [total, setTotal] = useState(0);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    listProducts().then((res) => setProducts(res.results)).catch(console.error);
+    Promise.all([listProducts(), listCategories(), listStores()])
+      .then(([productsRes, categoriesRes, storesRes]) => {
+        setProducts(productsRes.results || []);
+        setCategories(categoriesRes.results || []);
+        const storeList = Array.isArray(storesRes)
+          ? storesRes
+          : Array.isArray((storesRes as any)?.results)
+            ? (storesRes as any).results
+            : [];
+        setStores(storeList.map((s: any) => ({ id: Number(s.id), name: s.name })));
+      })
+      .catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -77,14 +92,18 @@ const AddProductModal = ({ onSave, onClose, initialData }: AddProductModalProps)
   };
 
   const handleSelectProduct = (product: Product) => {
+    const resolvedCost = Number((product as any).cost_price ?? product.price ?? 0);
+    const resolvedTax = Number((product as any).tax ?? 0);
     setFormData((prev) => ({
       ...prev,
       product_id: product.id,
       product_name: product.name,
-      unit_price: product.price,
+      unit_price: resolvedCost,
+      tax_rate: resolvedTax,
     }));
     setSearchQuery(product.name);
     setShowSuggestions(false);
+    setError('');
   };
 
   const handleClearSearch = () => {
@@ -92,13 +111,28 @@ const AddProductModal = ({ onSave, onClose, initialData }: AddProductModalProps)
     setShowSuggestions(true);
     setFormData((prev) => ({
       ...prev,
-      product_id: Date.now(),
+      product_id: 0,
       product_name: '',
       unit_price: 0,
     }));
+    setError('');
   };
 
   const handleSubmit = () => {
+    const selectedProduct = products.find((p) => Number(p.id) === Number(formData.product_id));
+    if (!selectedProduct) {
+      setError('Select an existing product or create a new product first.');
+      return;
+    }
+    if (formData.quantity_ordered <= 0) {
+      setError('Quantity should be greater than 0.');
+      return;
+    }
+    if (formData.unit_price < 0) {
+      setError('Unit price cannot be negative.');
+      return;
+    }
+    setError('');
     onSave({ ...formData, discount_amount: discountAmount, tax_amount: taxAmount, total });
   };
 
@@ -153,6 +187,7 @@ const AddProductModal = ({ onSave, onClose, initialData }: AddProductModalProps)
               )}
             </div>
           )}
+          {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -241,11 +276,17 @@ const AddProductModal = ({ onSave, onClose, initialData }: AddProductModalProps)
         {showProductModal && (
           <ProductModal
             product={null}
-            categories={[]}
+            categories={categories}
+            stores={stores}
             onClose={() => setShowProductModal(false)}
-            onSave={() => {
+            onSave={async (data) => {
+              const created = await createProduct(data);
               setShowProductModal(false);
-              listProducts().then((res) => setProducts(res.results));
+              const refreshed = await listProducts();
+              setProducts(refreshed.results || []);
+              if (created?.id) {
+                handleSelectProduct(created as any);
+              }
             }}
           />
         )}

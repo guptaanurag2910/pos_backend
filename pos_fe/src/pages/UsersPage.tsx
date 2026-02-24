@@ -22,10 +22,11 @@ const UsersPage = () => {
     name: '',
     email: '',
     role: 'cashier',
-    storeId: 'store1',
+    storeId: '',
   });
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [createdCreds, setCreatedCreds] = useState<{ email: string; password: string } | null>(null);
 
   useEffect(() => {
     loadUsers();
@@ -46,13 +47,14 @@ const UsersPage = () => {
     setIsLoading(true);
 
     try {
-      await addUser(newUser as Omit<User, 'id' | 'createdAt' | 'active'>);
+      const creds = await addUser(newUser as Omit<User, 'id' | 'createdAt' | 'active'>);
       setShowAddModal(false);
+      setCreatedCreds(creds);
       setNewUser({
         name: '',
         email: '',
         role: 'cashier',
-        storeId: 'store1',
+        storeId: '',
       });
     } catch (err) {
       setError('Failed to add user');
@@ -271,10 +273,10 @@ const UsersPage = () => {
                   </label>
                   <select
                     value={newUser.storeId}
-                    onChange={(e) => setNewUser({ ...newUser, storeId: e.target.value })}
+                    disabled
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                   >
-                    <option value="store1">Main Store</option>
+                    <option value="store1">Current Store</option>
                   </select>
                 </div>
               </div>
@@ -296,6 +298,35 @@ const UsersPage = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {createdCreds && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg w-full max-w-md mx-4">
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <h2 className="text-xl font-semibold text-gray-800">Login Credentials</h2>
+              <button
+                onClick={() => setCreatedCreds(null)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <XCircle size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-3">
+              <p className="text-sm text-gray-600">
+                Share these credentials with the new store user.
+              </p>
+              <div className="rounded border p-3">
+                <div className="text-xs text-gray-500">Email</div>
+                <div className="font-medium text-gray-900">{createdCreds.email}</div>
+              </div>
+              <div className="rounded border p-3">
+                <div className="text-xs text-gray-500">Temporary Password</div>
+                <div className="font-medium text-gray-900">{createdCreds.password}</div>
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -9,13 +9,20 @@ from django.db import transaction
 from django.db.models import Sum, Count, F, Q
 from django.utils import timezone
 
-from .models import Customer, CustomerGroup
+from .models import Customer, CustomerGroup, CustomerStoreLink
 from .serializers import CustomerSerializer, CustomerGroupSerializer
 from accounts.permissions import IsManagerUser
 from accounts.models import AuditLog
 from accounts.utils import get_client_ip
 
 logger = logging.getLogger('customers')
+
+
+def _is_global_admin(user):
+    return bool(
+        getattr(user, 'is_superuser', False) or
+        (getattr(user, 'role', None) == 'admin' and not getattr(user, 'store_id', None))
+    )
 
 class CustomerViewSet(viewsets.ModelViewSet):
     queryset = Customer.objects.all()
@@ -35,7 +42,16 @@ class CustomerViewSet(viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
 
     def get_queryset(self):
+        user = self.request.user
         queryset = Customer.objects.all()
+        if not _is_global_admin(user):
+            user_store = getattr(user, 'store', None)
+            if not user_store:
+                return Customer.objects.none()
+            queryset = queryset.filter(
+                Q(store_links__store=user_store) |
+                Q(bills__store=user_store)
+            ).distinct()
         include_inactive = str(self.request.query_params.get('include_inactive', 'false')).lower() == 'true'
         if not include_inactive:
             queryset = queryset.filter(is_active=True)
@@ -44,7 +60,15 @@ class CustomerViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def purchase_history(self, request, pk=None):
         customer = self.get_object()
-        bills = customer.bills.all().order_by('-created_at')
+        bills = customer.bills.all()
+        user = request.user
+        if not _is_global_admin(user):
+            user_store = getattr(user, 'store', None)
+            if not user_store:
+                bills = bills.none()
+            else:
+                bills = bills.filter(store=user_store)
+        bills = bills.order_by('-created_at')
         
         from sales.serializers import BillSerializer
         serializer = BillSerializer(bills, many=True, context={'request': request})
@@ -105,6 +129,16 @@ class CustomerViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         with transaction.atomic():
             customer = serializer.save(created_by=self.request.user)
+            user_store = getattr(self.request.user, 'store', None)
+            if user_store:
+                CustomerStoreLink.objects.update_or_create(
+                    customer=customer,
+                    store=user_store,
+                    defaults={
+                        'is_active': True,
+                        'created_by': self.request.user,
+                    }
+                )
             logger.info(f"customer_create_completed actor_id={self.request.user.id} customer_id={customer.id}")
             
             # Log the action
@@ -120,6 +154,16 @@ class CustomerViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         with transaction.atomic():
             customer = serializer.save()
+            user_store = getattr(self.request.user, 'store', None)
+            if user_store:
+                CustomerStoreLink.objects.update_or_create(
+                    customer=customer,
+                    store=user_store,
+                    defaults={
+                        'is_active': True,
+                        'created_by': self.request.user,
+                    }
+                )
             logger.info(f"customer_update_completed actor_id={self.request.user.id} customer_id={customer.id}")
             
             # Log the action
@@ -151,22 +195,23 @@ class CustomerViewSet(viewsets.ModelViewSet):
     def stats(self, request):
         """Get customer statistics"""
         logger.info(f"customer_stats_requested actor_id={request.user.id}")
-        total_customers = Customer.objects.count()
-        active_customers = Customer.objects.filter(
+        base_qs = self.get_queryset()
+        total_customers = base_qs.count()
+        active_customers = base_qs.filter(
             bills__created_at__gte=timezone.now() - timezone.timedelta(days=90)
         ).distinct().count()
         
         # Top customers by purchase amount
-        top_by_amount = Customer.objects.order_by('-total_purchases')[:10]
+        top_by_amount = base_qs.order_by('-total_purchases')[:10]
         top_by_amount_data = CustomerSerializer(top_by_amount, many=True, context={'request': request}).data
         
         # Top customers by loyalty points
-        top_by_points = Customer.objects.order_by('-loyalty_points')[:10]
+        top_by_points = base_qs.order_by('-loyalty_points')[:10]
         top_by_points_data = CustomerSerializer(top_by_points, many=True, context={'request': request}).data
         
         # New customers this month
         this_month = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        new_customers = Customer.objects.filter(created_at__gte=this_month).count()
+        new_customers = base_qs.filter(created_at__gte=this_month).count()
         
         return Response({
             'total_customers': total_customers,
@@ -192,11 +237,11 @@ class CustomerViewSet(viewsets.ModelViewSet):
             return Response({"detail": "primary customer cannot be in duplicates."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            primary = Customer.objects.get(id=primary_id)
+            primary = self.get_queryset().get(id=primary_id)
         except Customer.DoesNotExist:
             return Response({"detail": "Primary customer not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        duplicates = Customer.objects.filter(id__in=duplicate_ids, is_active=True).exclude(id=primary.id)
+        duplicates = self.get_queryset().filter(id__in=duplicate_ids, is_active=True).exclude(id=primary.id)
         if not duplicates.exists():
             return Response({"detail": "No valid active duplicate customers found."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -205,7 +250,11 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
             # Re-assign bills to primary
             from sales.models import Bill
-            Bill.objects.filter(customer_id__in=merged_ids).update(customer=primary)
+            bill_qs = Bill.objects.filter(customer_id__in=merged_ids)
+            user_store = getattr(request.user, 'store', None)
+            if not _is_global_admin(request.user) and user_store:
+                bill_qs = bill_qs.filter(store=user_store)
+            bill_qs.update(customer=primary)
 
             # Merge points and purchases
             primary.loyalty_points += sum(duplicates.values_list('loyalty_points', flat=True))
@@ -217,6 +266,15 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
             # Move groups and deactivate duplicates
             for dup in duplicates:
+                for link in dup.store_links.all():
+                    CustomerStoreLink.objects.update_or_create(
+                        customer=primary,
+                        store=link.store,
+                        defaults={
+                            'is_active': link.is_active,
+                            'created_by': request.user,
+                        }
+                    )
                 for group in dup.groups.all():
                     group.customers.add(primary)
                     group.customers.remove(dup)

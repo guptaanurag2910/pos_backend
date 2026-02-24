@@ -2,6 +2,32 @@ import axiosInstance from '../utils/axiosInstance';
 
 const INVENTORY_URL = '/api/inventory/';
 
+const sanitizeProductPayload = (input: any) => {
+  if (!input || typeof input !== 'object') return input;
+  const payload = { ...input };
+
+  // Remove read-only/display-only fields that should never be sent to PUT/POST.
+  delete payload.id;
+  delete payload.created_at;
+  delete payload.updated_at;
+  delete payload.current_stock;
+  delete payload.stock_details;
+  delete payload.category_name;
+
+  // Do not send image URL string in JSON requests.
+  if (typeof payload.image === 'string') {
+    delete payload.image;
+  }
+
+  // Normalize expiry date format.
+  if (payload.expiry_date === '') payload.expiry_date = null;
+  if (typeof payload.expiry_date === 'string' && payload.expiry_date.includes('T')) {
+    payload.expiry_date = payload.expiry_date.split('T')[0];
+  }
+
+  return payload;
+};
+
 // ---------------------------
 // Categories
 // ---------------------------
@@ -41,6 +67,10 @@ export const deleteCategory = async (id: number) => {
 interface ProductFilterParams {
   search?: string;
   category?: number;
+  page?: number;
+  page_size?: number;
+  in_stock_only?: boolean;
+  stock_status?: 'in_stock' | 'out_of_stock' | 'all';
 }
 
 export const listProducts = async (params: ProductFilterParams = {}) => {
@@ -48,6 +78,14 @@ export const listProducts = async (params: ProductFilterParams = {}) => {
   const cleanParams: Record<string, string | number> = {};
   if (params.search) cleanParams.search = params.search;
   if (params.category) cleanParams.category = params.category;
+  if (params.page) cleanParams.page = params.page;
+  if (params.page_size) cleanParams.page_size = params.page_size;
+  if (typeof params.in_stock_only === 'boolean') {
+    cleanParams.in_stock_only = params.in_stock_only ? 'true' : 'false';
+  }
+  if (params.stock_status && params.stock_status !== 'all') {
+    cleanParams.stock_status = params.stock_status;
+  }
 
   const res = await axiosInstance.get(`${INVENTORY_URL}products/`, { params: cleanParams });
   if (Array.isArray(res.data)) {
@@ -65,12 +103,12 @@ export const getProduct = async (id: number) => {
 };
 
 export const createProduct = async (data: any) => {
-  const res = await axiosInstance.post(`${INVENTORY_URL}products/`, data);
+  const res = await axiosInstance.post(`${INVENTORY_URL}products/`, sanitizeProductPayload(data));
   return res.data;
 };
 
 export const updateProduct = async (id: number, data: any) => {
-  const res = await axiosInstance.put(`${INVENTORY_URL}products/${id}/`, data);
+  const res = await axiosInstance.put(`${INVENTORY_URL}products/${id}/`, sanitizeProductPayload(data));
   return res.data;
 };
 
@@ -93,6 +131,33 @@ export const adjustProductStock = async (
   data: { store: number; quantity: number; reason?: string }
 ) => {
   const res = await axiosInstance.post(`${INVENTORY_URL}products/${id}/adjust_stock/`, data);
+  return res.data;
+};
+
+export const downloadInventorySheet = async (storeId?: number) => {
+  const res = await axiosInstance.get(`${INVENTORY_URL}products/export_inventory_sheet/`, {
+    params: storeId ? { store: storeId } : {},
+    responseType: 'blob',
+  });
+  return res;
+};
+
+export const uploadInventorySheet = async (
+  file: File,
+  storeId?: number,
+  override = true
+) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (storeId) formData.append('store', String(storeId));
+  formData.append('override', override ? 'true' : 'false');
+  const res = await axiosInstance.post(
+    `${INVENTORY_URL}products/import_inventory_sheet/`,
+    formData,
+    {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }
+  );
   return res.data;
 };
 

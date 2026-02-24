@@ -7,18 +7,22 @@ import {
   CheckCircle,
   AlertTriangle,
   Eye,
-  Edit,
   Package,
   Trash,
+  FileText,
 } from 'lucide-react';
-import { deleteGRN, listGRNs } from '../../service/purchaseService';
+import { completeGRN, deleteGRN, listGRNs, listSupplierInvoices } from '../../service/purchaseService';
 import toast from 'react-hot-toast';
 import ProcurementFlowStepper from '../../components/purchase/ProcurementFlowStepper';
+import DeleteConfirmModal from '../../components/common/DeleteConfirmModal';
 
 const GoodsReceiptPage = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [grnRecords, setGrnRecords] = useState<any[]>([]);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [invoiceMap, setInvoiceMap] = useState<Record<number, number | null>>({});
+  const [completingId, setCompletingId] = useState<number | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -27,16 +31,44 @@ const GoodsReceiptPage = () => {
 
   const loadGRNs = async () => {
     try {
-      const res = await listGRNs();
-      setGrnRecords(res.results || []);
+      const [grnRes, invoiceRes] = await Promise.all([
+        listGRNs({ page_size: 500 }),
+        listSupplierInvoices({ page_size: 500 }),
+      ]);
+      const grnList = Array.isArray(grnRes?.results) ? grnRes.results : [];
+      const invoiceList = Array.isArray(invoiceRes?.results) ? invoiceRes.results : [];
+      setGrnRecords(grnList);
+
+      const nextMap: Record<number, number | null> = {};
+      grnList.forEach((grn: any) => {
+        const id = Number(grn.id);
+        const linked = invoiceList.find(
+          (inv: any) =>
+            Number(inv.goods_receipt || inv.grn || 0) === id
+        );
+        nextMap[id] = linked ? Number(linked.id) : null;
+      });
+      setInvoiceMap(nextMap);
     } catch (error) {
       console.error(error);
     }
   };
 
+  const handleComplete = async (id: number) => {
+    try {
+      setCompletingId(id);
+      await completeGRN(id);
+      toast.success('GRN completed and inventory updated');
+      await loadGRNs();
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error?.response?.data?.detail || 'Failed to complete GRN');
+    } finally {
+      setCompletingId(null);
+    }
+  };
+
   const handleDeleteGRN = async (id: number) => {
-    const ok = window.confirm('Soft delete this GRN? You can still view it with include_inactive.');
-    if (!ok) return;
     try {
       await deleteGRN(id);
       toast.success('GRN deleted');
@@ -44,6 +76,8 @@ const GoodsReceiptPage = () => {
     } catch (error: any) {
       console.error(error);
       toast.error(error?.response?.data?.detail || 'Failed to delete GRN');
+    } finally {
+      setDeleteId(null);
     }
   };
 
@@ -221,28 +255,45 @@ const GoodsReceiptPage = () => {
                     </td>
                     <td className="px-6 py-4">{grn.received_by}</td>
                     <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end space-x-2">
+                      <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => navigate(`/purchase/invoices?grn=${grn.id}&po=${grn.purchase_order || ''}`)}
-                          className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700"
+                          onClick={() =>
+                            invoiceMap[Number(grn.id)]
+                              ? navigate(`/purchase/invoices?edit=${invoiceMap[Number(grn.id)]}&grn=${grn.id}&po=${grn.purchase_order || ''}`)
+                              : navigate(`/purchase/invoices?grn=${grn.id}&po=${grn.purchase_order || ''}`)
+                          }
+                          title={invoiceMap[Number(grn.id)] ? 'Open Supplier Invoice' : 'Create Supplier Invoice'}
+                          className={`rounded border p-2 ${
+                            invoiceMap[Number(grn.id)]
+                              ? 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100'
+                              : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+                          }`}
                         >
-                          Create SI
+                          <FileText size={16} />
                         </button>
                         <button
                           onClick={() => navigate(`/grns/${grn.id}`)}
-                          className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300"
+                          title="View GRN"
+                          className="rounded border border-blue-200 bg-blue-50 p-2 text-blue-700 hover:bg-blue-100"
                         >
                           <Eye size={16} />
                         </button>
                         <button
-                          onClick={() => navigate(`/grns/${grn.id}`)}
-                          className="text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                          onClick={() => handleComplete(Number(grn.id))}
+                          disabled={grn.status === 'completed' || completingId === Number(grn.id)}
+                          title={grn.status === 'completed' ? 'Already completed' : 'Mark complete and update inventory'}
+                          className={`rounded border p-2 ${
+                            grn.status === 'completed'
+                              ? 'cursor-not-allowed border-green-300 bg-green-50 text-green-700'
+                              : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                          }`}
                         >
-                          <Edit size={16} />
+                          <CheckCircle size={16} />
                         </button>
                         <button
-                          onClick={() => handleDeleteGRN(Number(grn.id))}
-                          className="text-red-600 hover:text-red-800"
+                          onClick={() => setDeleteId(Number(grn.id))}
+                          title="Delete GRN"
+                          className="rounded border border-red-200 bg-red-50 p-2 text-red-700 hover:bg-red-100"
                         >
                           <Trash size={16} />
                         </button>
@@ -262,6 +313,15 @@ const GoodsReceiptPage = () => {
           </table>
         </div>
       </div>
+      <DeleteConfirmModal
+        isOpen={deleteId !== null}
+        title="Delete GRN"
+        message="Soft delete this GRN? You can still view it with include_inactive=true."
+        onCancel={() => setDeleteId(null)}
+        onConfirm={() => {
+          if (deleteId !== null) handleDeleteGRN(deleteId);
+        }}
+      />
     </div>
   );
 };

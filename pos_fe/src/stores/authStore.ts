@@ -34,7 +34,7 @@ interface AuthStore extends AuthState {
   logout: () => void;
   loadUserFromToken: () => Promise<void>;
   loadUsers: () => Promise<void>;
-  addUser: (payload: { name: string; email: string; role: string; storeId?: string; password?: string }) => Promise<void>;
+  addUser: (payload: { name: string; email: string; role: string; storeId?: string; password?: string }) => Promise<{ email: string; password: string }>;
   toggleUserStatus: (userId: string) => Promise<void>;
   updateSettings: (settings: Partial<AuthState['settings']>) => void;
   toggleTheme: () => void;
@@ -141,12 +141,16 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       name: payload.name,
       email: payload.email,
       role: payload.role,
-      store: payload.storeId ? Number(payload.storeId) : Number(get().user?.storeId || 0) || null,
+      store: Number(get().user?.storeId || 0) || null,
       password: payload.password || 'Temp@12345',
     };
 
-    await axiosInstance.post('/api/auth/users/', body);
+    const res = await axiosInstance.post('/api/auth/users/create-store-user/', body);
     await get().loadUsers();
+    return {
+      email: res?.data?.credentials?.email || body.email,
+      password: res?.data?.credentials?.password || body.password,
+    };
   },
 
   toggleUserStatus: async (userId: string) => {

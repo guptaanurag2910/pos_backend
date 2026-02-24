@@ -5,8 +5,9 @@ import {
   Receipt,
   Clock,
   CheckCircle,
-  Edit,
   IndianRupee,
+  CreditCard,
+  Eye,
   Upload,
   Trash,
 } from 'lucide-react';
@@ -14,11 +15,13 @@ import toast from 'react-hot-toast';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import ProcurementFlowStepper from '../../components/purchase/ProcurementFlowStepper';
 import SupplierInvoiceModal from '../../components/purchase/modals/SupplierInvoiceModal';
+import DeleteConfirmModal from '../../components/common/DeleteConfirmModal';
 import {
   createSupplierInvoice,
   getGRN,
   listGRNs,
   listSupplierInvoices,
+  listSupplierPayments,
   listSuppliers,
   deleteSupplierInvoice,
   updateSupplierInvoice,
@@ -69,6 +72,7 @@ const normalizeInvoice = (invoice: any) => {
       ? invoice.items.map((item: any) => ({
           id: String(item.id),
           productId: item.product_code || String(item.product_ref || ''),
+          productCode: item.product_code || '',
           productName: item.product_name_resolved || item.product_name || '',
           quantity: toNumber(item.quantity),
           unitPrice: toNumber(item.unit_price),
@@ -89,7 +93,9 @@ const SupplierInvoicesPage = () => {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<any>(null);
   const [selectedGRN, setSelectedGRN] = useState<any>(null);
+  const [deleteInvoiceId, setDeleteInvoiceId] = useState<number | null>(null);
   const [supplierInvoices, setSupplierInvoices] = useState<any[]>([]);
+  const [paymentMap, setPaymentMap] = useState<Record<number, number | null>>({});
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -101,12 +107,22 @@ const SupplierInvoicesPage = () => {
   const loadInvoices = async () => {
     setIsLoading(true);
     try {
-      const [invoiceResponse, suppliersResponse] = await Promise.all([
+      const [invoiceResponse, suppliersResponse, paymentsResponse] = await Promise.all([
         listSupplierInvoices({ page_size: 500 }),
         listSuppliers(),
+        listSupplierPayments({ page_size: 500 }),
       ]);
-      setSupplierInvoices(extractList(invoiceResponse).map(normalizeInvoice));
+      const invoices = extractList(invoiceResponse).map(normalizeInvoice);
+      const payments = extractList(paymentsResponse);
+      setSupplierInvoices(invoices);
       setSuppliers(Array.isArray(suppliersResponse) ? suppliersResponse : []);
+
+      const nextMap: Record<number, number | null> = {};
+      invoices.forEach((invoice: any) => {
+        const linked = payments.find((payment: any) => Number(payment.supplier_invoice || 0) === Number(invoice.id));
+        nextMap[Number(invoice.id)] = linked ? Number(linked.id) : null;
+      });
+      setPaymentMap(nextMap);
     } catch (error) {
       console.error('Failed to load supplier invoices:', error);
       toast.error('Failed to load supplier invoices');
@@ -244,6 +260,7 @@ const SupplierInvoicesPage = () => {
       items: (invoiceData.items || []).map((item: any) => {
         const productIdAsNumber = Number(item.productId);
         const isNumericProductRef = Number.isInteger(productIdAsNumber) && productIdAsNumber > 0;
+        const productCode = String(item.productCode || item.productId || '').trim();
         const baseAmount = toNumber(item.quantity) * toNumber(item.unitPrice);
         const discountAmount =
           item.discountType === 'amount'
@@ -254,7 +271,7 @@ const SupplierInvoicesPage = () => {
 
         return {
           product_ref: isNumericProductRef ? productIdAsNumber : null,
-          product_code: isNumericProductRef ? null : item.productId || null,
+          product_code: isNumericProductRef ? null : productCode || null,
           product_name: item.productName,
           quantity: toNumber(item.quantity),
           unit_price: toNumber(item.unitPrice),
@@ -304,8 +321,6 @@ const SupplierInvoicesPage = () => {
   };
 
   const handleDeleteInvoice = async (invoiceId: number) => {
-    const ok = window.confirm('Soft delete this Supplier Invoice?');
-    if (!ok) return;
     try {
       await deleteSupplierInvoice(invoiceId);
       toast.success('Supplier invoice deleted');
@@ -313,6 +328,8 @@ const SupplierInvoicesPage = () => {
     } catch (error: any) {
       console.error(error);
       toast.error(error?.response?.data?.detail || 'Failed to delete supplier invoice');
+    } finally {
+      setDeleteInvoiceId(null);
     }
   };
 
@@ -580,20 +597,31 @@ const SupplierInvoicesPage = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => navigate(`/purchase/payments?invoice=${invoice.id}&po=${invoice.purchaseOrderId || ''}`)}
-                          className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700"
+                          onClick={() =>
+                            paymentMap[Number(invoice.id)]
+                              ? navigate(`/purchase/payments?edit=${paymentMap[Number(invoice.id)]}&invoice=${invoice.id}&po=${invoice.purchaseOrderId || ''}`)
+                              : navigate(`/purchase/payments?invoice=${invoice.id}&po=${invoice.purchaseOrderId || ''}`)
+                          }
+                          title={paymentMap[Number(invoice.id)] ? 'Open Payment' : 'Create Payment'}
+                          className={`rounded border p-2 ${
+                            paymentMap[Number(invoice.id)]
+                              ? 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100'
+                              : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+                          }`}
                         >
-                          Record Payment
+                          <CreditCard size={16} />
                         </button>
                         <button
                           onClick={() => handleEditInvoice(invoice)}
-                          className="text-primary-600 dark:text-primary-400 hover:text-primary-900 dark:hover:text-primary-300"
+                          title="View Invoice"
+                          className="rounded border border-blue-200 bg-blue-50 p-2 text-blue-700 hover:bg-blue-100"
                         >
-                          <Edit size={16} />
+                          <Eye size={16} />
                         </button>
                         <button
-                          onClick={() => handleDeleteInvoice(Number(invoice.id))}
-                          className="text-red-600 hover:text-red-800"
+                          onClick={() => setDeleteInvoiceId(Number(invoice.id))}
+                          title="Delete Invoice"
+                          className="rounded border border-red-200 bg-red-50 p-2 text-red-700 hover:bg-red-100"
                         >
                           <Trash size={16} />
                         </button>
@@ -619,6 +647,15 @@ const SupplierInvoicesPage = () => {
         initialData={editingInvoice}
         poData={null}
         grnData={selectedGRN}
+      />
+      <DeleteConfirmModal
+        isOpen={deleteInvoiceId !== null}
+        title="Delete Supplier Invoice"
+        message="Soft delete this supplier invoice?"
+        onCancel={() => setDeleteInvoiceId(null)}
+        onConfirm={() => {
+          if (deleteInvoiceId !== null) handleDeleteInvoice(deleteInvoiceId);
+        }}
       />
     </div>
   );

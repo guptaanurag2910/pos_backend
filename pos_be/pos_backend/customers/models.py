@@ -39,6 +39,22 @@ class Customer(models.Model):
         return self.name or self.phone
 
 
+class CustomerStoreLink(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='store_links')
+    store = models.ForeignKey('stores.Store', on_delete=models.CASCADE, related_name='customer_links')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        unique_together = ('customer', 'store')
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"{self.customer_id}-{self.store_id}"
+
+
 class CustomerGroup(models.Model):
     name = models.CharField(max_length=100)
     slug = models.SlugField(max_length=100, unique=True)

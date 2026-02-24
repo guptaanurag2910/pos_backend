@@ -9,6 +9,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from django.utils.crypto import get_random_string
 from django.db import transaction
 
 from .serializers import (
@@ -306,6 +307,70 @@ class UserViewSet(viewsets.ModelViewSet):
             # Instead of deleting, we deactivate the user
             instance.is_active = False
             instance.save()
+
+    @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated, IsAdminUser], url_path='create-store-user')
+    def create_store_user(self, request):
+        actor = request.user
+        logger.info(f"create_store_user_requested actor_id={actor.id} email={request.data.get('email')}")
+
+        if not actor.store_id and not actor.is_superuser:
+            return Response(
+                {"detail": "Store admin must be associated with a store."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        role = request.data.get('role', 'cashier')
+        if role not in ['admin', 'manager', 'cashier']:
+            return Response(
+                {"detail": "Invalid role. Allowed roles: admin, manager, cashier."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        generated_password = request.data.get('password') or (
+            f"{get_random_string(4, allowed_chars='ABCDEFGHJKLMNPQRSTUVWXYZ')}"
+            f"{get_random_string(4, allowed_chars='abcdefghijkmnopqrstuvwxyz')}"
+            f"{get_random_string(4, allowed_chars='23456789')}"
+            "!"
+        )
+
+        payload = {
+            'name': request.data.get('name'),
+            'email': request.data.get('email'),
+            'role': role,
+            'store': actor.store_id,
+            'password': generated_password,
+        }
+        serializer = self.get_serializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            user = serializer.save()
+            AuditLog.objects.create(
+                user=actor,
+                action='create',
+                model_name='User',
+                object_id=str(user.id),
+                object_repr=str(user),
+                ip_address=get_client_ip(request),
+                details={
+                    'action': 'create_store_user',
+                    'role': role,
+                    'store_id': actor.store_id,
+                    'credentials_generated': bool(not request.data.get('password')),
+                }
+            )
+
+        logger.info(f"create_store_user_completed actor_id={actor.id} new_user_id={user.id} store_id={actor.store_id}")
+        return Response(
+            {
+                'user': self.get_serializer(user).data,
+                'credentials': {
+                    'email': user.email,
+                    'password': generated_password,
+                }
+            },
+            status=status.HTTP_201_CREATED
+        )
 
 class UserSessionViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = UserSessionSerializer

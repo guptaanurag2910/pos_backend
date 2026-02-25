@@ -106,7 +106,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   },
 
   logout: () => {
-    logoutAPI().catch((err) => console.error('Logout failed:', err));
+    logoutAPI().catch(() => null);
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
     set({ user: null, isAuthenticated: false, users: [] });

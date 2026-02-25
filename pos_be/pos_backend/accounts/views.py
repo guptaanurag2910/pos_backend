@@ -103,41 +103,48 @@ class CustomTokenObtainPairView(TokenObtainPairView):
         return response
 
 class LogoutView(generics.GenericAPIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     serializer_class = LogoutSerializer
     
     def post(self, request):
+        actor = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
         try:
-            logger.info(f"logout_requested user_id={request.user.id}")
+            logger.info(f"logout_requested user_id={getattr(actor, 'id', None)}")
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             refresh_token = serializer.validated_data['refresh_token']
-            token = RefreshToken(refresh_token)
-            token.blacklist()
+            try:
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+            except Exception:
+                # Token may already be blacklisted/expired; logout should remain idempotent.
+                pass
             
             # Update user session
-            UserSession.objects.filter(
-                user=request.user, 
-                session_key=refresh_token,
-                is_active=True
-            ).update(
-                logout_time=timezone.now(),
-                is_active=False
-            )
+            if actor:
+                UserSession.objects.filter(
+                    user=actor,
+                    session_key=refresh_token,
+                    is_active=True
+                ).update(
+                    logout_time=timezone.now(),
+                    is_active=False
+                )
             
             # Log logout activity
-            AuditLog.objects.create(
-                user=request.user,
-                action='logout',
-                ip_address=get_client_ip(request),
-                details={'user_agent': get_user_agent(request)}
-            )
+            if actor:
+                AuditLog.objects.create(
+                    user=actor,
+                    action='logout',
+                    ip_address=get_client_ip(request),
+                    details={'user_agent': get_user_agent(request)}
+                )
             
-            logger.info(f"logout_completed user_id={request.user.id}")
+            logger.info(f"logout_completed user_id={getattr(actor, 'id', None)}")
             return Response({"detail": "Successfully logged out."}, status=status.HTTP_200_OK)
         except Exception as e:
-            logger.error(f"logout_failed user_id={request.user.id} error={str(e)}")
-            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            logger.warning(f"logout_failed_graceful user_id={getattr(actor, 'id', None)} error={str(e)}")
+            return Response({"detail": "Successfully logged out."}, status=status.HTTP_200_OK)
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()

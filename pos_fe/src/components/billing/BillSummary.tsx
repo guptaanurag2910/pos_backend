@@ -10,7 +10,7 @@ const BillSummary = ({ subtotal, taxTotal, itemDiscountTotal = 0, discount, tota
   return (
     <div className="border-t dark:border-gray-700 pt-4 space-y-3">
       <div className="p-2 rounded bg-blue-50 dark:bg-blue-900/20 text-xs text-blue-700 dark:text-blue-300">
-        Formula: Line Total = (Rate x Qty) - Item Discount + Tax
+        Formula: Line Total = (Rate x Qty) - Item Discount (Tax already included in rate)
       </div>
       <div className="flex justify-between text-sm">
         <span className="text-gray-500 dark:text-gray-400">Subtotal:</span>
@@ -18,7 +18,7 @@ const BillSummary = ({ subtotal, taxTotal, itemDiscountTotal = 0, discount, tota
       </div>
       
       <div className="flex justify-between text-sm">
-        <span className="text-gray-500 dark:text-gray-400">Tax:</span>
+        <span className="text-gray-500 dark:text-gray-400">Tax (included):</span>
         <span className="font-medium text-gray-800 dark:text-gray-200">₹{taxTotal.toFixed(2)}</span>
       </div>
 

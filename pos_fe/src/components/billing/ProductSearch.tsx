@@ -28,9 +28,14 @@ const ProductSearch = ({ onSelectProduct, inputRef }: ProductSearchProps) => {
     const totalStock = stockDetails.length
       ? stockDetails.reduce((sum: number, level: any) => sum + toNumber(level?.quantity, 0), 0)
       : toNumber(product?.current_stock, toNumber(product?.stock, 0));
+    const mrp = toNumber(product?.price, 0);
+    const rate = toNumber(product?.discount_price, mrp);
 
     return {
       ...product,
+      mrp,
+      rate,
+      price: rate,
       stock: totalStock,
       category: product.category_name || product.category || 'Uncategorized',
       unit: product.unit || 'piece',

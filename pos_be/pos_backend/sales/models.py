@@ -133,6 +133,15 @@ class Bill(models.Model):
             self.customer.total_purchases += self.total
             self.customer.last_purchase = timezone.now()
             self.customer.save()
+            from customers.models import CustomerStoreLink
+            CustomerStoreLink.objects.update_or_create(
+                customer=self.customer,
+                store=self.store,
+                defaults={
+                    'is_active': True,
+                    'created_by': self.cashier,
+                }
+            )
 
         self.save()
 

@@ -22,6 +22,12 @@ from .serializers import ReturnSerializer
 
 logger = logging.getLogger('return')
 
+def _is_global_admin(user):
+    return bool(
+        getattr(user, 'is_superuser', False) or
+        (getattr(user, 'role', None) == 'admin' and not getattr(user, 'store_id', None))
+    )
+
 
 class ReturnViewSet(viewsets.ModelViewSet):
     queryset = Return.objects.all()
@@ -50,9 +56,11 @@ class ReturnViewSet(viewsets.ModelViewSet):
         if not include_inactive:
             queryset = queryset.filter(is_active=True)
 
-        if user.role == 'admin':
+        if _is_global_admin(user):
             return queryset
-        return queryset.filter(bill__store=user.store)
+        if getattr(user, 'store', None):
+            return queryset.filter(bill__store=user.store)
+        return queryset.none()
 
     @staticmethod
     def _generate_return_number():

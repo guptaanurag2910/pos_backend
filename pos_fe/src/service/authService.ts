@@ -86,9 +86,16 @@ export const patchUser = async (
 
 export const logoutAPI = async (): Promise<void> => {
   const refresh_token = localStorage.getItem('refresh_token');
-  await axiosInstance.post(`${AUTH_URL}logout/`, { refresh_token });
-  localStorage.removeItem('access_token');
-  localStorage.removeItem('refresh_token');
+  try {
+    if (refresh_token) {
+      await axiosInstance.post(`${AUTH_URL}logout/`, { refresh_token });
+    }
+  } catch {
+    // Logout should be idempotent on client; token may already be expired/invalid.
+  } finally {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+  }
 };
 
 export const refreshToken = async (): Promise<{ access: string }> => {

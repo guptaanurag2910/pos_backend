@@ -26,6 +26,13 @@ from stores.models import Store
 logger = logging.getLogger('sales')
 
 
+def _is_global_admin(user):
+    return bool(
+        getattr(user, 'is_superuser', False) or
+        (getattr(user, 'role', None) == 'admin' and not getattr(user, 'store_id', None))
+    )
+
+
 def _resolve_store(request):
     """
     Resolve store for bill creation:
@@ -116,9 +123,11 @@ class BillViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'admin':
+        if _is_global_admin(user):
             return Bill.objects.all()
-        return Bill.objects.filter(store=user.store)
+        if getattr(user, 'store', None):
+            return Bill.objects.filter(store=user.store)
+        return Bill.objects.none()
 
     def _generate_invoice_number(self, bill):
         try:
@@ -481,14 +490,33 @@ class BillItemViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
+        user = self.request.user
         bill_id = self.kwargs.get('bill_pk')
         if bill_id:
-            return BillItem.objects.filter(bill_id=bill_id)
+            qs = BillItem.objects.filter(bill_id=bill_id)
+            if _is_global_admin(user):
+                return qs
+            user_store = getattr(user, 'store', None)
+            if not user_store:
+                return BillItem.objects.none()
+            return qs.filter(bill__store=user_store)
         return BillItem.objects.none()
+
+    def _get_scoped_bill(self, bill_id):
+        user = self.request.user
+        qs = Bill.objects.filter(id=bill_id)
+        if _is_global_admin(user):
+            return qs.first()
+        user_store = getattr(user, 'store', None)
+        if not user_store:
+            return None
+        return qs.filter(store=user_store).first()
     
     def perform_create(self, serializer):
         bill_id = self.kwargs.get('bill_pk')
-        bill = Bill.objects.get(id=bill_id)
+        bill = self._get_scoped_bill(bill_id)
+        if not bill:
+            raise ValidationError({"detail": "Bill not found for this store/user"})
         
         # Check if bill can be modified
         if bill.status not in ['draft', 'on_hold']:
@@ -564,9 +592,11 @@ class PaymentViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'admin':
+        if _is_global_admin(user):
             return Payment.objects.all()
-        return Payment.objects.filter(bill__store=user.store)
+        if getattr(user, 'store', None):
+            return Payment.objects.filter(bill__store=user.store)
+        return Payment.objects.none()
     
     def get_bill_queryset(self):
         bill_id = self.kwargs.get('bill_pk')

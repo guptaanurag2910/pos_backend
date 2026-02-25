@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, CreditCard, IndianRupee, Smartphone, FileText } from 'lucide-react';
 
 interface PaymentData {
@@ -27,8 +27,9 @@ interface PaymentModalProps {
   initialData?: PaymentData;
 }
 
-const PaymentModal = ({ isOpen, onClose, onSave, invoiceData, initialData }: PaymentModalProps) => {
-  const [formData, setFormData] = useState<PaymentData>({
+const buildDefaultFormData = (
+  invoiceData?: PaymentModalProps['invoiceData']
+): PaymentData => ({
     paymentNumber: `PAY-${Date.now().toString().slice(-6)}`,
     invoiceId: invoiceData?.id || '',
     supplierName: invoiceData?.supplierName || '',
@@ -37,16 +38,23 @@ const PaymentModal = ({ isOpen, onClose, onSave, invoiceData, initialData }: Pay
     paymentMethod: 'bank_transfer',
     referenceNumber: '',
     notes: '',
-    status: 'completed'
+    status: 'completed',
   });
+
+const PaymentModal = ({ isOpen, onClose, onSave, invoiceData, initialData }: PaymentModalProps) => {
+  const [formData, setFormData] = useState<PaymentData>(() => buildDefaultFormData(invoiceData));
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  useState(() => {
+  useEffect(() => {
+    if (!isOpen) return;
     if (initialData) {
       setFormData(initialData);
+      return;
     }
-  });
+    setFormData(buildDefaultFormData(invoiceData));
+    setErrors({});
+  }, [isOpen, initialData, invoiceData]);
 
   const handleInputChange = (field: keyof PaymentData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));

@@ -1,9 +1,13 @@
 import { useState, useEffect } from 'react';
-import { X, Plus, Trash2, Upload } from 'lucide-react';
+import { X, Plus, Trash2 } from 'lucide-react';
+import { createProduct, listCategories, listProducts } from '../../../service/inventoryService';
+import { listStores } from '../../../service/storeService';
+import ProductModal from '../../inventory/ProductModal';
 
 interface SupplierInvoiceItem {
   id: string;
   productId: string;
+  productCode?: string;
   productName: string;
   quantity: number;
   unitPrice: number;
@@ -61,6 +65,27 @@ const SupplierInvoiceModal = ({ isOpen, onClose, onSave, initialData, poData, gr
     paymentTerms: 'Net 30',
     notes: ''
   });
+  const [products, setProducts] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [stores, setStores] = useState<Array<{ id: number; name: string }>>([]);
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    Promise.all([listProducts({ page_size: 1000 } as any), listCategories(), listStores()])
+      .then(([productsRes, categoriesRes, storesRes]) => {
+        setProducts(Array.isArray((productsRes as any)?.results) ? (productsRes as any).results : []);
+        setCategories(Array.isArray((categoriesRes as any)?.results) ? (categoriesRes as any).results : []);
+        const storeList = Array.isArray(storesRes)
+          ? storesRes
+          : Array.isArray((storesRes as any)?.results)
+            ? (storesRes as any).results
+            : [];
+        setStores(storeList.map((s: any) => ({ id: Number(s.id), name: s.name })));
+      })
+      .catch(console.error);
+  }, [isOpen]);
 
   useEffect(() => {
     if (initialData) {
@@ -75,6 +100,7 @@ const SupplierInvoiceModal = ({ isOpen, onClose, onSave, initialData, poData, gr
         items: sourceData.items.map((item: any) => ({
           id: `inv_item_${Date.now()}_${Math.random()}`,
           productId: item.productId,
+          productCode: '',
           productName: item.productName,
           quantity: grnData ? item.acceptedQuantity : item.quantity,
           unitPrice: item.unitPrice || 0,
@@ -149,6 +175,48 @@ const SupplierInvoiceModal = ({ isOpen, onClose, onSave, initialData, poData, gr
     setFormData(prev => ({ ...prev, items: updatedItems }));
   };
 
+  const addManualItem = () => {
+    setFormData((prev) => ({
+      ...prev,
+      items: [
+        ...prev.items,
+        {
+          id: `inv_item_${Date.now()}_${Math.random()}`,
+          productId: '',
+          productCode: '',
+          productName: '',
+          quantity: 1,
+          unitPrice: 0,
+          discount: 0,
+          discountType: 'percentage',
+          taxRate: 0,
+          total: 0,
+        },
+      ],
+    }));
+  };
+
+  const handleExistingProductSelect = (index: number, productId: string) => {
+    const selected = products.find((p) => String(p.id) === String(productId));
+    if (!selected) {
+      updateItem(index, 'productId', '');
+      return;
+    }
+    const updatedItems = [...formData.items];
+    const existing = updatedItems[index];
+    updatedItems[index] = {
+      ...existing,
+      productId: String(selected.id),
+      productCode: selected.barcode || '',
+      productName: selected.name || existing.productName,
+      unitPrice: existing.unitPrice > 0 ? existing.unitPrice : Number(selected.cost_price ?? selected.price ?? 0),
+      taxRate: existing.taxRate > 0 ? existing.taxRate : Number(selected.tax ?? 0),
+    };
+
+    setFormData((prev) => ({ ...prev, items: updatedItems }));
+    setError('');
+  };
+
   const removeItem = (index: number) => {
     const updatedItems = formData.items.filter((_, i) => i !== index);
     setFormData(prev => ({ ...prev, items: updatedItems }));
@@ -177,6 +245,24 @@ const SupplierInvoiceModal = ({ isOpen, onClose, onSave, initialData, poData, gr
       alert('Please fill in supplier invoice number, supplier name, and add at least one item');
       return;
     }
+    for (const item of formData.items) {
+      const hasProductRef = Number.isInteger(Number(item.productId)) && Number(item.productId) > 0;
+      const hasManualCode = !!String(item.productCode || '').trim();
+      const hasName = !!String(item.productName || '').trim();
+      if (!hasProductRef && !hasManualCode) {
+        setError('Each invoice item must have either an existing product or a product code/barcode.');
+        return;
+      }
+      if (!hasName) {
+        setError('Each invoice item must have product name.');
+        return;
+      }
+      if (Number(item.quantity) <= 0 || Number(item.unitPrice) < 0) {
+        setError('Invoice item quantity should be > 0 and unit price should be >= 0.');
+        return;
+      }
+    }
+    setError('');
     const result = await Promise.resolve(onSave(formData));
     if (result === false) return;
     onClose();
@@ -323,9 +409,21 @@ const SupplierInvoiceModal = ({ isOpen, onClose, onSave, initialData, poData, gr
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-medium text-gray-800 dark:text-gray-100">Invoice Items</h3>
               <div className="flex space-x-2">
-                <button className="flex items-center px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">
-                  <Upload size={16} className="mr-2" />
-                  Import from PO/GRN
+                <button
+                  type="button"
+                  onClick={addManualItem}
+                  className="flex items-center px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  <Plus size={16} className="mr-2" />
+                  Add Item
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowProductModal(true)}
+                  className="flex items-center px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  <Plus size={16} className="mr-2" />
+                  Create Product
                 </button>
               </div>
             </div>
@@ -346,7 +444,36 @@ const SupplierInvoiceModal = ({ isOpen, onClose, onSave, initialData, poData, gr
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                   {formData.items.map((item, index) => (
                     <tr key={item.id}>
-                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">{item.productName}</td>
+                      <td className="px-4 py-3">
+                        <div className="space-y-1">
+                          <select
+                            value={Number(item.productId) > 0 ? item.productId : ''}
+                            onChange={(e) => handleExistingProductSelect(index, e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded text-xs text-gray-900 dark:text-gray-100"
+                          >
+                            <option value="">Select existing product (optional)</option>
+                            {products.map((product) => (
+                              <option key={product.id} value={product.id}>
+                                {product.name} ({product.barcode || 'no barcode'})
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type="text"
+                            value={item.productName}
+                            onChange={(e) => updateItem(index, 'productName', e.target.value)}
+                            placeholder="Product name *"
+                            className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded text-xs text-gray-900 dark:text-gray-100"
+                          />
+                          <input
+                            type="text"
+                            value={item.productCode || ''}
+                            onChange={(e) => updateItem(index, 'productCode', e.target.value)}
+                            placeholder="Product code / barcode (required for new product)"
+                            className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded text-xs text-gray-900 dark:text-gray-100"
+                          />
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-center">
                         <input
                           type="number"
@@ -416,6 +543,7 @@ const SupplierInvoiceModal = ({ isOpen, onClose, onSave, initialData, poData, gr
                   No items added yet. Import from PO/GRN or add items manually.
                 </div>
               )}
+              {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
             </div>
           </div>
 
@@ -482,6 +610,40 @@ const SupplierInvoiceModal = ({ isOpen, onClose, onSave, initialData, poData, gr
           </button>
         </div>
       </div>
+      {showProductModal && (
+        <ProductModal
+          product={null}
+          categories={categories}
+          stores={stores}
+          onClose={() => setShowProductModal(false)}
+          onSave={async (data) => {
+            const created = await createProduct(data);
+            setShowProductModal(false);
+            const refreshed = await listProducts({ page_size: 1000 } as any);
+            setProducts(Array.isArray((refreshed as any)?.results) ? (refreshed as any).results : []);
+            if (created?.id) {
+              addManualItem();
+              setTimeout(() => {
+                setFormData((prev) => {
+                  if (!prev.items.length) return prev;
+                  const items = [...prev.items];
+                  const idx = items.length - 1;
+                  const existing = items[idx];
+                  items[idx] = {
+                    ...existing,
+                    productId: String(created.id),
+                    productCode: created.barcode || '',
+                    productName: created.name || existing.productName,
+                    unitPrice: Number(created.cost_price ?? created.price ?? existing.unitPrice ?? 0),
+                    taxRate: Number(created.tax ?? existing.taxRate ?? 0),
+                  };
+                  return { ...prev, items };
+                });
+              }, 0);
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

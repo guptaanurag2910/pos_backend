@@ -1,17 +1,30 @@
 import { Trash2, Plus, Minus } from 'lucide-react';
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { BillItem } from '../../types';
 
 interface BillItemsListProps {
   items: BillItem[];
   updateQuantity: (itemId: string, quantity: number) => void;
-  updateDiscount: (itemId: string, discountRate: number) => void;
+  updateDiscount: (itemId: string, discountRate: number, discountType?: 'percentage' | 'amount') => void;
   removeItem: (itemId: string) => void;
 }
 
 const BillItemsList = ({ items, updateQuantity, updateDiscount, removeItem }: BillItemsListProps) => {
   const inputRefs = useRef<Array<Array<HTMLInputElement | null>>>([]);
+  const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({});
+  const [discountDrafts, setDiscountDrafts] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const nextQty: Record<string, string> = {};
+    const nextDiscount: Record<string, string> = {};
+    for (const item of items) {
+      nextQty[item.id] = String(Number(item.quantity || 0));
+      nextDiscount[item.id] = String(Number((item as any).discountValue ?? item.discountRate ?? 0));
+    }
+    setQtyDrafts(nextQty);
+    setDiscountDrafts(nextDiscount);
+  }, [items]);
 
   const focusCell = (row: number, col: number) => {
     const maxRow = items.length - 1;
@@ -52,6 +65,30 @@ const BillItemsList = ({ items, updateQuantity, updateDiscount, removeItem }: Bi
     }
   };
 
+  const commitQty = (item: BillItem) => {
+    const draft = qtyDrafts[item.id];
+    const parsed = Number(draft);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      updateQuantity(item.id, parsed);
+      return;
+    }
+    setQtyDrafts((prev) => ({ ...prev, [item.id]: String(Number(item.quantity || 1)) }));
+  };
+
+  const commitDiscount = (item: BillItem) => {
+    const draft = discountDrafts[item.id];
+    const parsed = Number(draft);
+    const discountType = (item as any).discountType === 'amount' ? 'amount' : 'percentage';
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      updateDiscount(item.id, parsed, discountType);
+      return;
+    }
+    setDiscountDrafts((prev) => ({
+      ...prev,
+      [item.id]: String(Number((item as any).discountValue ?? item.discountRate ?? 0)),
+    }));
+  };
+
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -84,9 +121,9 @@ const BillItemsList = ({ items, updateQuantity, updateDiscount, removeItem }: Bi
           <tr className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
             <th className="px-4 py-3">Item</th>
             <th className="px-4 py-3 text-center">Qty</th>
-            <th className="px-4 py-3 text-center">Disc %</th>
-            <th className="px-4 py-3 text-right">MRP (Ref)</th>
-            <th className="px-4 py-3 text-right">Selling Rate</th>
+            <th className="px-4 py-3 text-center">Disc</th>
+            <th className="px-4 py-3 text-right">MRP</th>
+            <th className="px-4 py-3 text-right">Rate</th>
             <th className="px-4 py-3 text-right">Total</th>
             <th className="px-4 py-3 w-10"></th>
           </tr>
@@ -116,14 +153,13 @@ const BillItemsList = ({ items, updateQuantity, updateDiscount, removeItem }: Bi
                     }}
                     type="number"
                     min="1"
-                    value={item.quantity}
-                    onKeyDown={(e) => handleGridNav(e, index, 0)}
-                    onChange={(e) => {
-                      const value = Number(e.target.value);
-                      if (!isNaN(value) && value > 0) {
-                        updateQuantity(item.id, value);
-                      }
+                    value={qtyDrafts[item.id] ?? String(Number(item.quantity || 0))}
+                    onKeyDown={(e) => {
+                      handleGridNav(e, index, 0);
+                      if (e.key === 'Enter') commitQty(item);
                     }}
+                    onChange={(e) => setQtyDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                    onBlur={() => commitQty(item)}
                     className="w-12 mx-1 text-center border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded text-sm"
                   />
                   <button
@@ -135,36 +171,48 @@ const BillItemsList = ({ items, updateQuantity, updateDiscount, removeItem }: Bi
                 </div>
               </td>
 
-              <td className="px-4 py-3 text-center">
-                <input
-                  ref={(el) => {
-                    if (!inputRefs.current[index]) inputRefs.current[index] = [];
-                    inputRefs.current[index][1] = el;
-                  }}
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.01"
-                  value={Number(item.discountRate || 0)}
-                  onKeyDown={(e) => handleGridNav(e, index, 1)}
-                  onChange={(e) => {
-                    const value = Number(e.target.value);
-                    if (!isNaN(value)) {
-                      updateDiscount(item.id, value);
-                    }
-                  }}
-                  className="w-16 mx-auto text-center border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded text-sm"
-                />
+              <td className="px-4 py-3">
+                <div className="flex items-center justify-center gap-1">
+                  <select
+                    value={(item as any).discountType === 'amount' ? 'amount' : 'percentage'}
+                    onChange={(e) => {
+                      const nextType = e.target.value === 'amount' ? 'amount' : 'percentage';
+                      const current = Number(discountDrafts[item.id] ?? 0);
+                      updateDiscount(item.id, Number.isFinite(current) ? current : 0, nextType);
+                    }}
+                    className="h-8 border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded text-xs"
+                  >
+                    <option value="percentage">%</option>
+                    <option value="amount">₹</option>
+                  </select>
+                  <input
+                    ref={(el) => {
+                      if (!inputRefs.current[index]) inputRefs.current[index] = [];
+                      inputRefs.current[index][1] = el;
+                    }}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={discountDrafts[item.id] ?? String(Number((item as any).discountValue ?? item.discountRate ?? 0))}
+                    onKeyDown={(e) => {
+                      handleGridNav(e, index, 1);
+                      if (e.key === 'Enter') commitDiscount(item);
+                    }}
+                    onChange={(e) => setDiscountDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                    onBlur={() => commitDiscount(item)}
+                    className="w-16 text-center border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded text-sm"
+                  />
+                </div>
               </td>
 
               <td className="px-4 py-3 text-sm text-right text-gray-800 dark:text-gray-200">
-                ₹{Number(item.mrp || item.price || 0).toFixed(2)}
+                ₹{Number((item as any).mrp ?? item.price ?? 0).toFixed(2)}
               </td>
 
               <td className="px-4 py-3 text-sm text-right text-gray-800 dark:text-gray-200">
-                ₹{Number(item.price || 0).toFixed(2)}
+                ₹{Number((item as any).rate ?? item.price ?? 0).toFixed(2)}
                 <div className="text-xs text-gray-500 dark:text-gray-400">
-                  Disc: ₹{Number(item.discount || 0).toFixed(2)} | Tax: {Number(item.tax || 0).toFixed(2)}%
+                  Tax: {Number(item.tax || 0).toFixed(2)}%
                 </div>
               </td>
 

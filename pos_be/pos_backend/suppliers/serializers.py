@@ -1,10 +1,12 @@
 from rest_framework import serializers
 from django.db.models import F, Sum, Q
+from django.db import IntegrityError
 from .models import (
     Supplier, PurchaseOrder, PurchaseOrderItem,
     GoodsReceiptNote, GoodsReceiptNoteItem, SupplierPayment,
     SupplierInvoice, SupplierInvoiceItem
 )
+from inventory.models import Product
 
 class SupplierSerializer(serializers.ModelSerializer):
     created_by_name = serializers.StringRelatedField(source='created_by', read_only=True)
@@ -194,10 +196,64 @@ class SupplierInvoiceSerializer(serializers.ModelSerializer):
             'invoice_number': {'required': False},
         }
 
+    def _resolve_invoice_item_product(self, item_data):
+        product_ref = item_data.get('product_ref')
+        product_code = (item_data.get('product_code') or '').strip()
+        product_name = (item_data.get('product_name') or '').strip()
+        unit_price = item_data.get('unit_price') or 0
+        tax_rate = item_data.get('tax_rate') or 0
+
+        if product_ref:
+            return item_data
+
+        matched = None
+        if product_code:
+            matched = Product.objects.filter(barcode=product_code).first()
+        if not matched and product_name:
+            matched = Product.objects.filter(name__iexact=product_name).first()
+
+        if matched:
+            item_data['product_ref'] = matched
+            if not item_data.get('product_code'):
+                item_data['product_code'] = matched.barcode
+            if not item_data.get('product_name'):
+                item_data['product_name'] = matched.name
+            return item_data
+
+        if not product_code:
+            raise serializers.ValidationError(
+                {'items': 'For new invoice items, product code/barcode is required when product is not in catalog.'}
+            )
+
+        resolved_name = product_name or f"Product {product_code}"
+        requested_tax = float(tax_rate or 0)
+        allowed_taxes = [0, 5, 12, 18, 28]
+        resolved_tax = min(allowed_taxes, key=lambda x: abs(x - requested_tax))
+        normalized_code = product_code[:20]
+        try:
+            created_product = Product.objects.create(
+                name=resolved_name[:255],
+                barcode=normalized_code,
+                price=unit_price,
+                cost_price=unit_price,
+                tax=resolved_tax,
+                is_active=True,
+            )
+        except IntegrityError:
+            created_product = Product.objects.filter(barcode=normalized_code).first()
+            if not created_product:
+                raise
+
+        item_data['product_ref'] = created_product
+        item_data['product_code'] = created_product.barcode
+        item_data['product_name'] = resolved_name
+        return item_data
+
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
         invoice = SupplierInvoice.objects.create(**validated_data)
         for item_data in items_data:
+            item_data = self._resolve_invoice_item_product(item_data)
             SupplierInvoiceItem.objects.create(invoice=invoice, **item_data)
         return invoice
 
@@ -209,6 +265,7 @@ class SupplierInvoiceSerializer(serializers.ModelSerializer):
         if items_data is not None:
             SupplierInvoiceItem.objects.filter(invoice=instance).delete()
             for item_data in items_data:
+                item_data = self._resolve_invoice_item_product(item_data)
                 SupplierInvoiceItem.objects.create(invoice=instance, **item_data)
         return instance
 

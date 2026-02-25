@@ -145,7 +145,7 @@ const PaymentModal = ({
         <div className="p-6">
           <div className="mb-4 rounded-lg border border-gray-200 p-3 text-sm text-gray-700">
             <div className="flex justify-between"><span>Subtotal</span><span>₹{subtotal.toFixed(2)}</span></div>
-            <div className="flex justify-between"><span>Tax</span><span>₹{taxTotal.toFixed(2)}</span></div>
+            <div className="flex justify-between"><span>Tax (included)</span><span>₹{taxTotal.toFixed(2)}</span></div>
             <div className="flex justify-between text-error-700"><span>Item Discounts</span><span>-₹{itemDiscountTotal.toFixed(2)}</span></div>
             <div className="flex justify-between text-error-700"><span>Bill Discount</span><span>-₹{discount.toFixed(2)}</span></div>
           </div>

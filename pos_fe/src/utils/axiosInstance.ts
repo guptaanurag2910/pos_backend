@@ -21,10 +21,13 @@ axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const requestUrl = String(originalRequest?.url || '');
+    const isLogoutRequest = requestUrl.includes('/api/auth/logout/');
 
     // Token expired or unauthorized
     if (
       error.response?.status === 401 &&
+      !isLogoutRequest &&
       !String(originalRequest?.url || '').includes('/api/auth/token/refresh/') &&
       !originalRequest._retry &&
       localStorage.getItem('refresh_token')

@@ -30,7 +30,7 @@ interface POSStore extends POSState {
   addProductToBill: (product: Product, quantity: number) => { ok: boolean; message?: string };
   removeItemFromBill: (itemId: string) => void;
   updateItemQuantity: (itemId: string, quantity: number) => void;
-  updateItemDiscount: (itemId: string, discountRate: number) => void;
+  updateItemDiscount: (itemId: string, discountRate: number, discountType?: 'percentage' | 'amount') => void;
   applyDiscount: (amount: number, isPercentage: boolean) => void;
   setCustomer: (customer: Customer | null) => void;
   searchCustomers: (query: string) => Customer[];
@@ -49,22 +49,38 @@ const round2 = (value: number) => parseFloat(value.toFixed(2));
 
 const computeItemTotals = (item: any) => {
   const quantity = toNumber(item?.quantity, 0);
-  const price = toNumber(item?.price, 0);
+  const rate = toNumber(item?.rate ?? item?.price, 0);
   const taxRate = toNumber(item?.tax, 0);
-  const discountRate = Math.max(0, Math.min(100, toNumber(item?.discountRate, 0)));
+  const discountType = item?.discountType === 'amount' ? 'amount' : 'percentage';
+  const rawDiscountValue = toNumber(item?.discountValue ?? item?.discountRate, 0);
 
-  const gross = price * quantity;
-  const discountAmount = gross * (discountRate / 100);
-  const taxable = gross - discountAmount;
-  const taxAmount = taxable * (taxRate / 100);
-  const total = taxable + taxAmount;
+  const gross = rate * quantity;
+  const normalizedDiscountValue = Math.max(0, rawDiscountValue);
+
+  let discountAmount = 0;
+  let discountRate = 0;
+
+  if (discountType === 'amount') {
+    discountAmount = Math.min(normalizedDiscountValue, gross);
+    discountRate = gross > 0 ? (discountAmount / gross) * 100 : 0;
+  } else {
+    discountRate = Math.max(0, Math.min(100, normalizedDiscountValue));
+    discountAmount = gross * (discountRate / 100);
+  }
+
+  // Selling rate is tax-inclusive in inventory; keep tax as display breakup only.
+  const total = gross - discountAmount;
+  const taxAmount = taxRate > 0 ? total - total / (1 + taxRate / 100) : 0;
+  const subtotalExTax = total - taxAmount;
 
   return {
+    discountType,
+    discountValue: round2(discountType === 'amount' ? discountAmount : discountRate),
     discountRate,
     discountAmount: round2(discountAmount),
     taxAmount: round2(taxAmount),
     total: round2(total),
-    subtotalExTax: round2(taxable),
+    subtotalExTax: round2(subtotalExTax),
   };
 };
 
@@ -87,13 +103,17 @@ const normalizeProduct = (product: any): Product => {
   const minStock = stockDetails.length
     ? Math.min(...stockDetails.map((level: any) => toNumber(level?.min_stock, 0)))
     : 0;
+  const mrp = toNumber(product.price, 0);
+  const rate = toNumber(product.discount_price, mrp);
 
   return {
     id: product.id,
     name: product.name,
     barcode: product.barcode,
     category: product.category_name || product.category || 'Uncategorized',
-    price: toNumber(product.price),
+    price: rate,
+    mrp,
+    rate,
     costPrice: toNumber(product.cost_price),
     tax: toNumber(product.tax),
     stock: totalStock,
@@ -119,11 +139,16 @@ const normalizeApiBill = (bill: any): Bill => {
         id: String(item.id),
         productId: item.product,
         productName: item.product_name || item.productName || '',
+        barcode: item.product_barcode || item.barcode || '',
         quantity: toNumber(item.quantity),
         price: toNumber(item.price),
+        mrp: toNumber(item.mrp ?? item.price),
+        rate: toNumber(item.rate ?? item.price),
         tax: toNumber(item.tax_rate ?? item.tax),
         discount: toNumber(item.discount_amount ?? 0),
         discountRate: toNumber(item.discount_rate ?? 0),
+        discountType: 'percentage',
+        discountValue: toNumber(item.discount_rate ?? 0),
         total: toNumber(item.total),
       }))
     : [];
@@ -236,6 +261,8 @@ export const usePOSStore = create<POSStore>((set, get) => ({
         newItems[existingItemIndex] = {
           ...existingItem,
           quantity: newQuantity,
+          discountType: computed.discountType,
+          discountValue: computed.discountValue,
           discountRate: computed.discountRate,
           discount: computed.discountAmount,
           total: computed.total,
@@ -248,17 +275,24 @@ export const usePOSStore = create<POSStore>((set, get) => ({
         }
         const computed = computeItemTotals({
           quantity: safeQuantity,
-          price: product.price,
+          rate: toNumber((product as any).rate, product.price),
           tax: product.tax,
+          discountType: 'percentage',
+          discountValue: 0,
           discountRate: 0,
         });
         const newItem: BillItem = {
           id: `item_${Date.now()}`,
           productId: product.id,
           productName: product.name,
+          barcode: product.barcode,
           quantity: safeQuantity,
-          price: product.price,
+          mrp: toNumber((product as any).mrp, product.price),
+          rate: toNumber((product as any).rate, product.price),
+          price: toNumber((product as any).rate, product.price),
           tax: product.tax,
+          discountType: computed.discountType,
+          discountValue: computed.discountValue,
           discount: computed.discountAmount,
           discountRate: computed.discountRate,
           total: computed.total,
@@ -323,6 +357,8 @@ export const usePOSStore = create<POSStore>((set, get) => ({
       newItems[itemIndex] = {
         ...item,
         quantity: safeQuantity,
+        discountType: computed.discountType,
+        discountValue: computed.discountValue,
         discountRate: computed.discountRate,
         discount: computed.discountAmount,
         total: computed.total,
@@ -346,22 +382,24 @@ export const usePOSStore = create<POSStore>((set, get) => ({
     });
   },
 
-  updateItemDiscount: (itemId: string, discountRate: number) => {
+  updateItemDiscount: (itemId: string, discountRate: number, discountType: 'percentage' | 'amount' = 'percentage') => {
     set((state) => {
       const newItems = [...state.currentBill.items];
       const itemIndex = newItems.findIndex((item) => item.id === itemId);
       if (itemIndex === -1) return state;
 
       const item = newItems[itemIndex];
-      const safeDiscount = Math.max(0, Math.min(100, toNumber(discountRate, 0)));
       const computed = computeItemTotals({
         ...item,
-        discountRate: safeDiscount,
+        discountType,
+        discountValue: toNumber(discountRate, 0),
       });
 
       newItems[itemIndex] = {
         ...item,
-        discountRate: safeDiscount,
+        discountType: computed.discountType,
+        discountValue: computed.discountValue,
+        discountRate: computed.discountRate,
         discount: computed.discountAmount,
         total: computed.total,
       };

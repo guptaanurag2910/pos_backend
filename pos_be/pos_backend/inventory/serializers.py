@@ -40,6 +40,12 @@ class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.StringRelatedField(source='category', read_only=True)
     current_stock = serializers.SerializerMethodField()
     stock_details = serializers.SerializerMethodField()  # 🔥 New field
+    store = serializers.IntegerField(write_only=True, required=False)
+    quantity = serializers.DecimalField(max_digits=10, decimal_places=2, write_only=True, required=False)
+    min_stock = serializers.DecimalField(max_digits=10, decimal_places=2, write_only=True, required=False)
+    max_stock = serializers.DecimalField(max_digits=10, decimal_places=2, write_only=True, required=False, allow_null=True)
+    batch_number = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
+    expiry_date = serializers.DateField(write_only=True, required=False, allow_null=True)
 
     class Meta:
         model = Product
@@ -48,9 +54,23 @@ class ProductSerializer(serializers.ModelSerializer):
             'price', 'cost_price', 'discount_price', 'tax', 'hsn_code',
             'is_active', 'is_featured', 'is_service', 'unit', 'weight',
             'image', 'created_at', 'updated_at',
-            'current_stock', 'stock_details'  # Include the new field here
+            'current_stock', 'stock_details',
+            'store', 'quantity', 'min_stock', 'max_stock', 'batch_number', 'expiry_date'
         )
         read_only_fields = ('id', 'created_at', 'updated_at')
+
+    def _strip_stock_write_fields(self, validated_data):
+        for key in ['store', 'quantity', 'min_stock', 'max_stock', 'batch_number', 'expiry_date']:
+            validated_data.pop(key, None)
+        return validated_data
+
+    def create(self, validated_data):
+        validated_data = self._strip_stock_write_fields(validated_data)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        validated_data = self._strip_stock_write_fields(validated_data)
+        return super().update(instance, validated_data)
 
     def get_current_stock(self, obj):
         # Priority 1: Use annotation if present

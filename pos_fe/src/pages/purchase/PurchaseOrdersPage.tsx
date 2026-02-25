@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  Plus, Search, Clock, CheckCircle, Truck, Eye, Trash, Send, Circle
+  Plus, Search, Clock, CheckCircle, Truck, Eye, Trash, Send, Package
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -8,10 +8,9 @@ import {
   listPurchaseOrders,
   deletePurchaseOrder,
   listGRNs,
-  listSupplierInvoices,
-  listSupplierPayments,
 } from '../../service/purchaseService';
 import ProcurementFlowStepper from '../../components/purchase/ProcurementFlowStepper';
+import DeleteConfirmModal from '../../components/common/DeleteConfirmModal';
 
 const PurchaseOrdersPage = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -20,55 +19,34 @@ const PurchaseOrdersPage = () => {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [workflowMap, setWorkflowMap] = useState<Record<number, {
     grn: boolean;
-    invoice: boolean;
-    payment: boolean;
     grnId?: number | null;
-    invoiceId?: number | null;
-    paymentId?: number | null;
   }>>({});
   const navigate = useNavigate();
 
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [poRes, grnRes, invoiceRes, paymentRes] = await Promise.all([
+        const [poRes, grnRes] = await Promise.all([
           listPurchaseOrders({ page_size: 500 }),
           listGRNs({ page_size: 500 }),
-          listSupplierInvoices({ page_size: 500 }),
-          listSupplierPayments({ page_size: 500 }),
         ]);
 
         const poList = Array.isArray(poRes?.results) ? poRes.results : [];
         const grnList = Array.isArray(grnRes?.results) ? grnRes.results : [];
-        const invoiceList = Array.isArray(invoiceRes?.results) ? invoiceRes.results : [];
-        const paymentList = Array.isArray(paymentRes?.results) ? paymentRes.results : [];
 
         setPurchaseOrders(poList);
 
         const nextMap: Record<number, {
           grn: boolean;
-          invoice: boolean;
-          payment: boolean;
           grnId?: number | null;
-          invoiceId?: number | null;
-          paymentId?: number | null;
         }> = {};
         poList.forEach((po: any) => {
           const id = Number(po.id);
           const poGRNs = grnList.filter((g: any) => Number(g.purchase_order) === id);
-          const poInvoices = invoiceList.filter((inv: any) => Number(inv.purchase_order) === id);
-          const poPayments = paymentList.filter((p: any) => Number(p.purchase_order) === id);
           const latestGRN = poGRNs[0] || null;
-          const latestInvoice = poInvoices[0] || null;
-          const latestPayment = poPayments[0] || null;
-          const completedPayment = poPayments.find((p: any) => p.status === 'completed') || latestPayment;
           nextMap[id] = {
             grn: !!latestGRN,
-            invoice: !!latestInvoice,
-            payment: !!completedPayment,
             grnId: latestGRN?.id || null,
-            invoiceId: latestInvoice?.id || null,
-            paymentId: completedPayment?.id || null,
           };
         });
         setWorkflowMap(nextMap);
@@ -226,55 +204,36 @@ const PurchaseOrdersPage = () => {
                   {po.expected_delivery_date ? new Date(po.expected_delivery_date).toLocaleDateString() : '-'}
                 </td>
                 <td className="px-6 py-4 text-right">
-                  <div className="flex justify-end flex-wrap gap-2">
-                    <span className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-[11px] dark:border-gray-700">
-                      {workflowMap[po.id]?.grn ? <CheckCircle size={12} className="text-green-600" /> : <Circle size={12} className="text-gray-400" />}
-                      GRN
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-[11px] dark:border-gray-700">
-                      {workflowMap[po.id]?.invoice ? <CheckCircle size={12} className="text-green-600" /> : <Circle size={12} className="text-gray-400" />}
-                      SI
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-[11px] dark:border-gray-700">
-                      {workflowMap[po.id]?.payment ? <CheckCircle size={12} className="text-green-600" /> : <Circle size={12} className="text-gray-400" />}
-                      Payment
-                    </span>
+                  <div className="flex justify-end items-center gap-2">
                     <button
                       onClick={() =>
                         workflowMap[po.id]?.grnId
                           ? navigate(`/grns/${workflowMap[po.id]?.grnId}?po=${po.id}`)
                           : navigate(`/grns/new?po=${po.id}`)
                       }
-                      className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700"
+                      title={workflowMap[po.id]?.grn ? 'Open GRN' : 'Create GRN'}
+                      className={`rounded border p-2 ${
+                        workflowMap[po.id]?.grn
+                          ? 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100'
+                          : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
                     >
-                      {workflowMap[po.id]?.grn ? 'Open GRN' : 'Create GRN'}
+                      <Package size={16} />
                     </button>
                     <button
-                      onClick={() =>
-                        workflowMap[po.id]?.invoiceId
-                          ? navigate(`/purchase/invoices?edit=${workflowMap[po.id]?.invoiceId}&po=${po.id}`)
-                          : workflowMap[po.id]?.grnId
-                            ? navigate(`/purchase/invoices?grn=${workflowMap[po.id]?.grnId}&po=${po.id}`)
-                            : navigate(`/purchase/invoices?po=${po.id}`)
-                      }
-                      className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700"
+                      onClick={() => navigate(`/purchase-orders/${po.id}`)}
+                      title="View PO"
+                      className="rounded border border-blue-200 bg-blue-50 p-2 text-blue-700 hover:bg-blue-100"
                     >
-                      {workflowMap[po.id]?.invoice ? 'Open SI' : 'Create SI'}
+                      <Eye size={16} />
                     </button>
                     <button
-                      onClick={() =>
-                        workflowMap[po.id]?.paymentId
-                          ? navigate(`/purchase/payments?edit=${workflowMap[po.id]?.paymentId}&po=${po.id}`)
-                          : workflowMap[po.id]?.invoiceId
-                            ? navigate(`/purchase/payments?invoice=${workflowMap[po.id]?.invoiceId}&po=${po.id}`)
-                            : navigate(`/purchase/payments?po=${po.id}`)
-                      }
-                      className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700"
+                      onClick={() => setDeleteId(po.id)}
+                      title="Delete PO"
+                      className="rounded border border-red-200 bg-red-50 p-2 text-red-700 hover:bg-red-100"
                     >
-                      {workflowMap[po.id]?.payment ? 'Open Payment' : 'Record Payment'}
+                      <Trash size={16} />
                     </button>
-                    <button onClick={() => navigate(`/purchase-orders/${po.id}`)} className="text-blue-600 hover:text-blue-800"><Eye size={16} /></button>
-                    <button onClick={() => setDeleteId(po.id)} className="text-red-600 hover:text-red-800"><Trash size={16} /></button>
                   </div>
                 </td>
               </tr>
@@ -283,23 +242,13 @@ const PurchaseOrdersPage = () => {
         </table>
       </div>
 
-      {/* Delete Confirmation */}
-      {deleteId !== null && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-md">
-            <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Confirm Deletion</h2>
-            <p className="text-gray-600 dark:text-gray-300 mb-6">Are you sure you want to delete this purchase order?</p>
-            <div className="flex justify-end space-x-3">
-              <button onClick={() => setDeleteId(null)} className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded">
-                Cancel
-              </button>
-              <button onClick={confirmDelete} className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <DeleteConfirmModal
+        isOpen={deleteId !== null}
+        title="Delete Purchase Order"
+        message="Soft delete this purchase order? It will be hidden from default views."
+        onCancel={() => setDeleteId(null)}
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 };

@@ -35,6 +35,13 @@ logger = logging.getLogger('reports')
 
 
 class ReportBaseMixin:
+    def _is_global_admin(self, request):
+        user = request.user
+        return bool(
+            getattr(user, 'is_superuser', False) or
+            (getattr(user, 'role', None) == 'admin' and not getattr(user, 'store_id', None))
+        )
+
     def _table_has_column(self, table_name, column_name):
         with connection.cursor() as cursor:
             description = connection.introspection.get_table_description(cursor, table_name)
@@ -48,20 +55,23 @@ class ReportBaseMixin:
             queryset = queryset.filter(is_active=True)
 
         store_id = self._resolve_scope_store_id(request)
-        if request.user.role == 'admin' and request.query_params.get('store') and store_id:
+        if self._is_global_admin(request) and request.query_params.get('store') and store_id:
             queryset = queryset.filter(bills__store_id=store_id).distinct()
-        elif store_id:
+        elif not self._is_global_admin(request) and store_id:
             queryset = queryset.filter(bills__store_id=store_id).distinct()
 
         return queryset
 
     def _resolve_scope_store_id(self, request):
         explicit_store = request.query_params.get('store')
-        if request.user.role == 'admin' and explicit_store:
+        if self._is_global_admin(request) and explicit_store:
             return explicit_store
 
         if request.user.store_id:
             return request.user.store_id
+
+        if self._is_global_admin(request):
+            return None
 
         fallback = Store.objects.filter(is_main=True, is_active=True).values_list('id', flat=True).first()
         if fallback:
@@ -106,10 +116,10 @@ class ReportBaseMixin:
         store_id = self._resolve_scope_store_id(request)
         user = request.user
 
-        if user.role == 'admin' and request.query_params.get('store') and store_id:
+        if self._is_global_admin(request) and request.query_params.get('store') and store_id:
             return queryset.filter(store_id=store_id)
 
-        if user.role == 'admin':
+        if self._is_global_admin(request):
             return queryset
 
         if store_id:
@@ -197,9 +207,9 @@ class DashboardView(ReportBaseMixin, views.APIView):
 
         stock_levels = StockLevel.objects.select_related('product', 'store')
         scope_store_id = self._resolve_scope_store_id(request)
-        if request.user.role == 'admin' and request.query_params.get('store') and scope_store_id:
+        if self._is_global_admin(request) and request.query_params.get('store') and scope_store_id:
             stock_levels = stock_levels.filter(store_id=scope_store_id)
-        elif request.user.role != 'admin' and scope_store_id:
+        elif not self._is_global_admin(request) and scope_store_id:
             stock_levels = stock_levels.filter(store_id=scope_store_id)
 
         inventory_totals = stock_levels.aggregate(
@@ -539,9 +549,9 @@ class InventoryReportView(ReportBaseMixin, views.APIView):
 
         filters = Q()
         scope_store_id = self._resolve_scope_store_id(request)
-        if request.user.role == 'admin' and request.query_params.get('store') and scope_store_id:
+        if self._is_global_admin(request) and request.query_params.get('store') and scope_store_id:
             filters &= Q(store_id=scope_store_id)
-        elif request.user.role != 'admin' and scope_store_id:
+        elif not self._is_global_admin(request) and scope_store_id:
             filters &= Q(store_id=scope_store_id)
 
         if category_id:

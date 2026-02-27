@@ -1,17 +1,19 @@
 import os
 from pathlib import Path
 from datetime import timedelta
+from urllib.parse import urlparse, parse_qs
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Quick-start development settings - unsuitable for production
-SECRET_KEY = 'django-insecure-p0s-backend-secret-key-change-in-production'
+# Always inject this from env in staging/production.
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-p0s-backend-secret-key-change-in-production')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() in ('1', 'true', 'yes', 'on')
 
-ALLOWED_HOSTS = ['*']
+# Comma-separated hosts, e.g. "api.example.com,localhost".
+ALLOWED_HOSTS = [host.strip() for host in os.getenv('DJANGO_ALLOWED_HOSTS', '*').split(',') if host.strip()]
 
 # Application definition
 INSTALLED_APPS = [
@@ -71,16 +73,53 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'pos_backend.wsgi.application'
 
-# Database
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'pos',
-        'USER': 'anurag',
-        'PASSWORD': '',
-        'HOST': 'localhost',
-        'PORT': '5432',  # Default PostgreSQL port
+# Database:
+# 1) Prefer DATABASE_URL for hosted DBs.
+# 2) Fall back to DB_* values for local/docker.
+# 3) Optional sqlite mode for quick development.
+def _build_database_config():
+    database_url = os.getenv('DATABASE_URL', '').strip()
+    if database_url:
+        parsed = urlparse(database_url)
+        query = parse_qs(parsed.query)
+        sslmode_from_url = query.get('sslmode', [None])[0]
+        sslmode = sslmode_from_url or os.getenv('DB_SSLMODE', 'prefer')
+
+        return {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': (parsed.path or '').lstrip('/') or os.getenv('DB_NAME', 'pos'),
+            'USER': parsed.username or os.getenv('DB_USER', 'anurag'),
+            'PASSWORD': parsed.password or os.getenv('DB_PASSWORD', ''),
+            'HOST': parsed.hostname or os.getenv('DB_HOST', 'localhost'),
+            'PORT': str(parsed.port or os.getenv('DB_PORT', '5432')),
+            'OPTIONS': {
+                'sslmode': sslmode,
+            },
+        }
+
+    engine = os.getenv('DB_ENGINE', 'django.db.backends.postgresql')
+    if engine == 'django.db.backends.sqlite3':
+        sqlite_name = os.getenv('SQLITE_NAME', str(BASE_DIR / 'db.sqlite3'))
+        return {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': sqlite_name,
+        }
+
+    return {
+        'ENGINE': engine,
+        'NAME': os.getenv('DB_NAME', 'pos'),
+        'USER': os.getenv('DB_USER', 'anurag'),
+        'PASSWORD': os.getenv('DB_PASSWORD', ''),
+        'HOST': os.getenv('DB_HOST', 'localhost'),
+        'PORT': os.getenv('DB_PORT', '5432'),
+        'OPTIONS': {
+            'sslmode': os.getenv('DB_SSLMODE', 'prefer'),
+        },
     }
+
+
+DATABASES = {
+    'default': _build_database_config()
 }
 
 # DATABASES = {
@@ -126,8 +165,30 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# CORS settings
-CORS_ALLOW_ALL_ORIGINS = True
+def _csv_env(name, default=''):
+    return [item.strip() for item in os.getenv(name, default).split(',') if item.strip()]
+
+
+# CORS / CSRF:
+# - Keep wide-open for local dev by default.
+# - Restrict in production using env vars.
+CORS_ALLOW_ALL_ORIGINS = os.getenv(
+    'CORS_ALLOW_ALL_ORIGINS',
+    'True' if DEBUG else 'False'
+).lower() in ('1', 'true', 'yes', 'on')
+CORS_ALLOWED_ORIGINS = _csv_env('CORS_ALLOWED_ORIGINS', '')
+CSRF_TRUSTED_ORIGINS = _csv_env('CSRF_TRUSTED_ORIGINS', '')
+
+# Security headers/cookies (effective when running behind reverse proxy HTTPS).
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SESSION_COOKIE_SECURE = os.getenv(
+    'SESSION_COOKIE_SECURE',
+    'False' if DEBUG else 'True'
+).lower() in ('1', 'true', 'yes', 'on')
+CSRF_COOKIE_SECURE = os.getenv(
+    'CSRF_COOKIE_SECURE',
+    'False' if DEBUG else 'True'
+).lower() in ('1', 'true', 'yes', 'on')
 
 # REST Framework settings
 REST_FRAMEWORK = {

@@ -30,3 +30,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.docker.example

@@ -1,4 +1,22 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: pos_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pos}
+      POSTGRES_USER: ${POSTGRES_USER:-pos_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pos_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pos_user} -d ${POSTGRES_DB:-pos}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./pos_be/pos_backend
@@ -23,18 +41,18 @@ services:
       # DB_* are used when DATABASE_URL is not provided.
       DB_ENGINE: ${DB_ENGINE:-django.db.backends.postgresql}
       DB_NAME: ${DB_NAME:-pos}
-      DB_USER: ${DB_USER:-anurag}
-      DB_PASSWORD: ${DB_PASSWORD:-}
-      # Local host DB from inside container (Mac/Windows). Override in .env for hosted DB.
-      DB_HOST: ${DB_HOST:-host.docker.internal}
+      DB_USER: ${DB_USER:-pos_user}
+      DB_PASSWORD: ${DB_PASSWORD:-pos_password}
+      # Default: dockerized postgres service. Override in .env for hosted DB.
+      DB_HOST: ${DB_HOST:-db}
       DB_PORT: ${DB_PORT:-5432}
       DB_SSLMODE: ${DB_SSLMODE:-prefer}
       # Optional hosted DB (takes priority over DB_*):
       # postgresql://user:pass@host:5432/dbname?sslmode=require
       DATABASE_URL: ${DATABASE_URL:-}
-    # Needed on Linux for host.docker.internal support.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "8000:8000"
     volumes:
@@ -57,5 +75,6 @@ services:
 
 volumes:
   # Named volumes persist data across container restarts.
+  postgres_data:
   backend_media:
   backend_static:

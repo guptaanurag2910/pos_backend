@@ -1,0 +1,76 @@
+services:
+  db:
+    image: quay.io/sclorg/postgresql-16-c9s:latest
+    container_name: pos_db
+    restart: unless-stopped
+    environment:
+      POSTGRESQL_DATABASE: ${POSTGRES_DB:-pos}
+      POSTGRESQL_USER: ${POSTGRES_USER:-pos_user}
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-pos_password}
+      POSTGRES_DB: ${POSTGRES_DB:-pos}
+      POSTGRES_USER: ${POSTGRES_USER:-pos_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pos_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/pgsql/data:Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pos_user} -d ${POSTGRES_DB:-pos}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./pos_be/pos_backend
+      dockerfile: Containerfile
+    container_name: pos_backend
+    restart: unless-stopped
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-django-insecure-p0s-backend-secret-key-change-in-production}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
+      CORS_ALLOW_ALL_ORIGINS: ${CORS_ALLOW_ALL_ORIGINS:-True}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-False}
+      CSRF_COOKIE_SECURE: ${CSRF_COOKIE_SECURE:-False}
+      CREATE_DJANGO_SUPERUSER: ${CREATE_DJANGO_SUPERUSER:-False}
+      DJANGO_SUPERUSER_EMAIL: ${DJANGO_SUPERUSER_EMAIL:-}
+      DJANGO_SUPERUSER_NAME: ${DJANGO_SUPERUSER_NAME:-}
+      DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-}
+
+      DB_ENGINE: ${DB_ENGINE:-django.db.backends.postgresql}
+      DB_NAME: ${DB_NAME:-pos}
+      DB_USER: ${DB_USER:-pos_user}
+      DB_PASSWORD: ${DB_PASSWORD:-pos_password}
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_SSLMODE: ${DB_SSLMODE:-prefer}
+      DATABASE_URL: ${DATABASE_URL:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend_media:/app/media:Z
+      - backend_static:/app/static:Z
+
+  frontend:
+    build:
+      context: ./pos_fe
+      dockerfile: Containerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/}
+    container_name: pos_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3001:3001"
+
+volumes:
+  postgres_data:
+  backend_media:
+  backend_static:

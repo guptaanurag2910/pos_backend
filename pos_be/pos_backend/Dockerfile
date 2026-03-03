@@ -1,6 +1,6 @@
 # Official Docker Hub Python image.
 # Requirements include numpy/pandas versions that require Python >=3.11.
-ARG PYTHON_BASE_IMAGE=python:3.12-slim
+ARG PYTHON_BASE_IMAGE=python:3.11-slim
 FROM ${PYTHON_BASE_IMAGE}
 
 # Python runtime flags:

@@ -16,11 +16,48 @@ User = get_user_model()
 email = os.environ.get('DJANGO_SUPERUSER_EMAIL')
 name = os.environ.get('DJANGO_SUPERUSER_NAME')
 password = os.environ.get('DJANGO_SUPERUSER_PASSWORD')
-if User.objects.filter(email=email).exists():
-    print(f'[init] Superuser already exists: {email}')
-else:
-    User.objects.create_superuser(email=email, name=name, password=password)
+user, created = User.objects.get_or_create(
+    email=email,
+    defaults={
+        'name': name,
+        'is_staff': True,
+        'is_superuser': True,
+        'is_active': True,
+        'role': 'admin',
+    },
+)
+changed = False
+
+if created:
+    user.set_password(password)
+    changed = True
     print(f'[init] Superuser created: {email}')
+else:
+    if user.name != name:
+        user.name = name
+        changed = True
+    if getattr(user, 'role', None) != 'admin':
+        user.role = 'admin'
+        changed = True
+    if not user.is_staff:
+        user.is_staff = True
+        changed = True
+    if not user.is_superuser:
+        user.is_superuser = True
+        changed = True
+    if not user.is_active:
+        user.is_active = True
+        changed = True
+    if not user.check_password(password):
+        user.set_password(password)
+        changed = True
+
+if changed:
+    user.save()
+    if not created:
+        print(f'[init] Superuser updated from env: {email}')
+else:
+    print(f'[init] Superuser already up-to-date: {email}')
 "
   fi
 fi

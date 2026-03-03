@@ -1,11 +1,18 @@
-# Podman Setup (Postgres + Django + React in one stack)
+# Podman Setup (Dockerized FE + BE + DB)
 
-This stack uses Quay-hosted open images (not Docker Hub, not AWS Public ECR).
-Frontend is built with Vite and served via `vite preview`, and calls backend directly via `VITE_API_BASE_URL`.
+This stack builds Docker-compatible images for frontend/backend and runs everything with Podman.
+All runtime/base images are from Docker Hub (official images).
+
+- FE image: built from `pos_fe/Dockerfile`
+- BE image: built from `pos_be/pos_backend/Dockerfile`
+- DB image: `postgres:16-alpine`
+
+Frontend is built with Vite and served via `vite preview`, and calls backend via `VITE_API_BASE_URL`.
 
 ## 1) Prerequisites
 
 - Podman installed
+- Compose provider installed (`podman-compose` or `docker-compose`)
 - Podman machine initialized/running (macOS/Windows)
 
 macOS quick start:
@@ -21,10 +28,10 @@ podman machine start
 cp .env.podman.example .env
 ```
 
-## 3) Start full stack
+## 3) Build and start full stack
 
 ```bash
-podman compose up --build
+podman compose up --build -d
 ```
 
 Services:
@@ -32,13 +39,36 @@ Services:
 - Backend API: `http://localhost:8000`
 - Postgres DB: `localhost:5432`
 
-## 4) Run in background
+## 4) Persistent DB storage
+
+Postgres data is stored in the named volume `postgres_data`, so DB data survives container stop/start and restart.
+
+To reset DB state completely:
 
 ```bash
-podman compose up --build -d
+podman compose down -v
 ```
 
-## 5) Monitor and debug
+## 5) Backup before stop/restart
+
+Use the helper scripts so a DB backup is taken automatically before stopping or restarting the stack:
+
+```bash
+./scripts/podman-safe-stop.sh
+./scripts/podman-safe-restart.sh
+```
+
+These scripts auto-detect `podman compose` or `podman-compose`.
+
+Manual backup only:
+
+```bash
+./scripts/podman-db-backup.sh
+```
+
+Backups are saved in `./backups` as `pos_db_YYYYMMDD_HHMMSS.sql.gz`.
+
+## 6) Monitor and debug
 
 ```bash
 podman compose ps
@@ -49,33 +79,25 @@ podman compose logs -f db
 podman stats
 ```
 
-## 6) Stop stack
-
-```bash
-podman compose down
-```
-
-Reset everything (including DB volume):
-
-```bash
-podman compose down -v
-podman compose up --build
-```
-
 ## 7) Superuser auto-create
 
 Set in `.env`:
 
 ```env
 CREATE_DJANGO_SUPERUSER=True
-DJANGO_SUPERUSER_EMAIL=admin@example.com
-DJANGO_SUPERUSER_NAME=Platform Admin
+DJANGO_SUPERUSER_EMAIL=admin@pos.local
+DJANGO_SUPERUSER_NAME=Admin
 DJANGO_SUPERUSER_PASSWORD=Admin@12345
+DJANGO_ADMIN_SITE_HEADER=Django administration
+DJANGO_ADMIN_SITE_TITLE=Django site admin
+DJANGO_ADMIN_INDEX_TITLE=Site administration
 ```
 
 Behavior:
-- Created once on first startup.
-- Skipped if email already exists.
+- Created on first startup.
+- Updated on each startup to match `.env` (name/password/permissions), so admin creds stay in sync.
+- Login URL: `http://localhost:8000/admin`
+- Login field: `email` with `DJANGO_SUPERUSER_EMAIL` value.
 
 ## 8) Access DB
 
@@ -118,8 +140,7 @@ DB_SSLMODE=require
 Then restart:
 
 ```bash
-podman compose down
-podman compose up --build
+./scripts/podman-safe-restart.sh
 ```
 
 ## 10) Production-safe env baseline

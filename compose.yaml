@@ -1,19 +1,17 @@
 services:
   db:
-    image: quay.io/sclorg/postgresql-16-c9s:latest
+    image: postgres:16-alpine
     container_name: pos_db
     restart: unless-stopped
     environment:
-      POSTGRESQL_DATABASE: ${POSTGRES_DB:-pos}
-      POSTGRESQL_USER: ${POSTGRES_USER:-pos_user}
-      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-pos_password}
       POSTGRES_DB: ${POSTGRES_DB:-pos}
       POSTGRES_USER: ${POSTGRES_USER:-pos_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pos_password}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/pgsql/data:Z
+      - postgres_data:/var/lib/postgresql/data:Z
+      - ./backups:/backups:Z
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pos_user} -d ${POSTGRES_DB:-pos}"]
       interval: 10s
@@ -21,9 +19,10 @@ services:
       retries: 5
 
   backend:
+    image: localhost/pos-backend:latest
     build:
       context: ./pos_be/pos_backend
-      dockerfile: Containerfile
+      dockerfile: Dockerfile
     container_name: pos_backend
     restart: unless-stopped
     environment:
@@ -58,9 +57,10 @@ services:
       - backend_static:/app/static:Z
 
   frontend:
+    image: localhost/pos-frontend:latest
     build:
       context: ./pos_fe
-      dockerfile: Containerfile
+      dockerfile: Dockerfile
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/}
     container_name: pos_frontend

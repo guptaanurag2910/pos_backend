@@ -63,4 +63,9 @@ else:
 fi
 
 echo "[init] Starting gunicorn..."
-exec gunicorn pos_backend.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120
+if python -c "import gunicorn" >/dev/null 2>&1; then
+  exec python -m gunicorn pos_backend.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120
+fi
+
+echo "[init] gunicorn is not available. Falling back to Django runserver."
+exec python manage.py runserver 0.0.0.0:8000

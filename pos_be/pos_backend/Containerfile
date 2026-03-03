@@ -1,5 +1,5 @@
-# Use Quay-hosted open images (avoid Docker Hub/AWS Public ECR).
-ARG PYTHON_BASE_IMAGE=quay.io/sclorg/python-310-c9s:latest
+# Official Docker Hub Python image.
+ARG PYTHON_BASE_IMAGE=python:3.12-slim
 FROM ${PYTHON_BASE_IMAGE}
 
 # Python runtime flags:
@@ -9,6 +9,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
+
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt

@@ -1,5 +1,6 @@
 # Official Docker Hub Python image.
-ARG PYTHON_BASE_IMAGE=python:3.10-slim
+# Requirements include numpy/pandas versions that require Python >=3.11.
+ARG PYTHON_BASE_IMAGE=python:3.12-slim
 FROM ${PYTHON_BASE_IMAGE}
 
 # Python runtime flags:
@@ -9,6 +10,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
+
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt

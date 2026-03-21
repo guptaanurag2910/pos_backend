@@ -1,36 +1,78 @@
 import { useEffect, useState } from 'react';
-import { 
-  Users, 
-  UserPlus, 
-  Search, 
-  Mail, 
-  Shield, 
-  Store,
-  CheckCircle,
-  XCircle,
-  AlertCircle
-} from 'lucide-react';
-import { useAuthStore } from '../stores/authStore';
-import { User } from '../types';
+import { Users, UserPlus, Search, XCircle, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
+import { useAuthStore } from '../stores/authStore';
+
+type UserRole = 'admin' | 'manager' | 'cashier';
+
+const defaultCreateForm = {
+  name: '',
+  email: '',
+  role: 'cashier' as UserRole,
+  password: '',
+};
+
+const defaultEditForm = {
+  name: '',
+  email: '',
+  role: 'cashier' as UserRole,
+};
+
+const getErrorMessage = (err: unknown, fallback: string) => {
+  const error = err as { response?: { data?: unknown } };
+  const data = error?.response?.data;
+
+  if (data && typeof data === 'object') {
+    const detail = (data as { detail?: unknown }).detail;
+    if (typeof detail === 'string') return detail;
+
+    const firstFieldError = Object.values(data as Record<string, unknown>).find(
+      (value) => Array.isArray(value) && value.length > 0 && typeof value[0] === 'string'
+    ) as string[] | undefined;
+    if (firstFieldError?.[0]) return firstFieldError[0];
+  }
+
+  return fallback;
+};
+
+const coerceRole = (role: string): UserRole => {
+  if (role === 'admin' || role === 'manager' || role === 'cashier') return role;
+  return 'cashier';
+};
 
 const UsersPage = () => {
-  const { users, addUser, toggleUserStatus, loadUsers } = useAuthStore();
+  const {
+    users,
+    user: currentUser,
+    addUser,
+    updateUserDetails,
+    resetUserPassword,
+    toggleUserStatus,
+    loadUsers,
+  } = useAuthStore();
+
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newUser, setNewUser] = useState({
-    name: '',
-    email: '',
-    role: 'cashier',
-    storeId: '',
-  });
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [passwordTargetUserId, setPasswordTargetUserId] = useState<string | null>(null);
+
+  const [newUser, setNewUser] = useState(defaultCreateForm);
+  const [editUser, setEditUser] = useState(defaultEditForm);
+  const [newPassword, setNewPassword] = useState('');
+
   const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [createdCreds, setCreatedCreds] = useState<{ email: string; password: string } | null>(null);
 
   useEffect(() => {
     loadUsers();
   }, [loadUsers]);
+
+  const currentStoreLabel = currentUser?.storeId
+    ? `Store #${currentUser.storeId} (Logged-in)`
+    : 'Logged-in Store';
 
   const filteredUsers = users.filter((user) => {
     const query = searchQuery.toLowerCase();
@@ -44,30 +86,84 @@ const UsersPage = () => {
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setIsLoading(true);
 
+    if (newUser.password && newUser.password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+
+    setIsAdding(true);
     try {
-      const creds = await addUser(newUser as Omit<User, 'id' | 'createdAt' | 'active'>);
+      const creds = await addUser({
+        name: newUser.name,
+        email: newUser.email,
+        role: newUser.role,
+        password: newUser.password || undefined,
+      });
       setShowAddModal(false);
       setCreatedCreds(creds);
-      setNewUser({
-        name: '',
-        email: '',
-        role: 'cashier',
-        storeId: '',
-      });
+      setNewUser(defaultCreateForm);
     } catch (err) {
-      setError('Failed to add user');
+      setError(getErrorMessage(err, 'Failed to add user'));
     } finally {
-      setIsLoading(false);
+      setIsAdding(false);
+    }
+  };
+
+  const openEditModal = (userId: string) => {
+    const target = users.find((user) => String(user.id) === String(userId));
+    if (!target) return;
+    setError('');
+    setEditingUserId(target.id);
+    setEditUser({
+      name: target.name,
+      email: target.email,
+      role: coerceRole(target.role),
+    });
+  };
+
+  const handleUpdateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUserId) return;
+    setError('');
+    setIsUpdating(true);
+    try {
+      await updateUserDetails(editingUserId, editUser);
+      setEditingUserId(null);
+      setEditUser(defaultEditForm);
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to update user'));
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passwordTargetUserId) return;
+    setError('');
+    if (newPassword.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+    setIsResettingPassword(true);
+    try {
+      await resetUserPassword(passwordTargetUserId, newPassword);
+      setPasswordTargetUserId(null);
+      setNewPassword('');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to reset password'));
+    } finally {
+      setIsResettingPassword(false);
     }
   };
 
   const handleToggleStatus = async (userId: string) => {
+    setError('');
     try {
       await toggleUserStatus(userId);
     } catch (err) {
-      console.error('Failed to toggle user status:', err);
+      setError(getErrorMessage(err, 'Failed to update user status'));
     }
   };
 
@@ -78,10 +174,13 @@ const UsersPage = () => {
           <h1 className="text-2xl font-bold text-gray-800">Users</h1>
           <p className="text-gray-600">Manage system users and permissions</p>
         </div>
-        
+
         <div className="mt-4 sm:mt-0">
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={() => {
+              setError('');
+              setShowAddModal(true);
+            }}
             className="flex items-center py-2 px-4 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
           >
             <UserPlus size={18} className="mr-2" />
@@ -89,6 +188,13 @@ const UsersPage = () => {
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="mb-4 p-3 bg-error-50 text-error-700 rounded-lg flex items-center">
+          <AlertCircle size={18} className="mr-2" />
+          {error}
+        </div>
+      )}
 
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         <div className="p-4 border-b">
@@ -145,25 +251,25 @@ const UsersPage = () => {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                      user.role === 'admin'
-                        ? 'bg-primary-100 text-primary-800'
-                        : user.role === 'manager'
-                        ? 'bg-secondary-100 text-secondary-800'
-                        : 'bg-gray-100 text-gray-800'
-                    }`}>
+                    <span
+                      className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                        user.role === 'admin'
+                          ? 'bg-primary-100 text-primary-800'
+                          : user.role === 'manager'
+                            ? 'bg-secondary-100 text-secondary-800'
+                            : 'bg-gray-100 text-gray-800'
+                      }`}
+                    >
                       {user.role}
                     </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    Main Store
-                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{currentStoreLabel}</td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                      user.active
-                        ? 'bg-success-100 text-success-800'
-                        : 'bg-error-100 text-error-800'
-                    }`}>
+                    <span
+                      className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                        user.active ? 'bg-success-100 text-success-800' : 'bg-error-100 text-error-800'
+                      }`}
+                    >
                       {user.active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
@@ -171,16 +277,27 @@ const UsersPage = () => {
                     {format(new Date(user.createdAt), 'MMM d, yyyy')}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button
-                      onClick={() => handleToggleStatus(user.id)}
-                      className={`text-sm font-medium ${
-                        user.active
-                          ? 'text-error-600 hover:text-error-800'
-                          : 'text-success-600 hover:text-success-800'
-                      }`}
-                    >
-                      {user.active ? 'Deactivate' : 'Activate'}
-                    </button>
+                    <div className="flex items-center justify-end gap-3">
+                      <button onClick={() => openEditModal(user.id)} className="text-primary-600 hover:text-primary-800">
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => {
+                          setError('');
+                          setPasswordTargetUserId(user.id);
+                          setNewPassword('');
+                        }}
+                        className="text-secondary-700 hover:text-secondary-900"
+                      >
+                        Reset Password
+                      </button>
+                      <button
+                        onClick={() => handleToggleStatus(user.id)}
+                        className={user.active ? 'text-error-600 hover:text-error-800' : 'text-success-600 hover:text-success-800'}
+                      >
+                        {user.active ? 'Deactivate' : 'Activate'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -194,23 +311,23 @@ const UsersPage = () => {
               </div>
               <p className="text-gray-500 font-medium">No users found</p>
               <p className="text-gray-400 text-sm mt-1">
-                {searchQuery
-                  ? 'Try adjusting your search'
-                  : 'Add users to see them here'}
+                {searchQuery ? 'Try adjusting your search' : 'Add users to see them here'}
               </p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Add User Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg w-full max-w-md mx-4">
             <div className="flex items-center justify-between border-b px-6 py-4">
               <h2 className="text-xl font-semibold text-gray-800">Add New User</h2>
               <button
-                onClick={() => setShowAddModal(false)}
+                onClick={() => {
+                  setShowAddModal(false);
+                  setError('');
+                }}
                 className="text-gray-500 hover:text-gray-700"
               >
                 <XCircle size={20} />
@@ -218,18 +335,9 @@ const UsersPage = () => {
             </div>
 
             <form onSubmit={handleAddUser} className="p-6">
-              {error && (
-                <div className="mb-4 p-3 bg-error-50 text-error-700 rounded-lg flex items-center">
-                  <AlertCircle size={18} className="mr-2" />
-                  {error}
-                </div>
-              )}
-
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Name
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
                   <input
                     type="text"
                     required
@@ -240,9 +348,7 @@ const UsersPage = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                   <input
                     type="email"
                     required
@@ -253,12 +359,10 @@ const UsersPage = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Role
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
                   <select
                     value={newUser.role}
-                    onChange={(e) => setNewUser({ ...newUser, role: e.target.value as User['role'] })}
+                    onChange={(e) => setNewUser({ ...newUser, role: coerceRole(e.target.value) })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                   >
                     <option value="cashier">Cashier</option>
@@ -268,33 +372,185 @@ const UsersPage = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Store
-                  </label>
-                  <select
-                    value={newUser.storeId}
-                    disabled
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Temporary Password (Optional)</label>
+                  <input
+                    type="text"
+                    value={newUser.password}
+                    placeholder="Leave blank to auto-generate"
+                    onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                  >
-                    <option value="store1">Current Store</option>
-                  </select>
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Store</label>
+                  <input
+                    type="text"
+                    disabled
+                    value={currentStoreLabel}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-600"
+                  />
                 </div>
               </div>
 
               <div className="mt-6 flex justify-end space-x-3">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setError('');
+                  }}
                   className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={isLoading}
+                  disabled={isAdding}
                   className="px-4 py-2 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 disabled:opacity-50"
                 >
-                  {isLoading ? 'Adding...' : 'Add User'}
+                  {isAdding ? 'Adding...' : 'Add User'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {editingUserId && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg w-full max-w-md mx-4">
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <h2 className="text-xl font-semibold text-gray-800">Update User</h2>
+              <button
+                onClick={() => {
+                  setEditingUserId(null);
+                  setError('');
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <XCircle size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateUser} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editUser.name}
+                  onChange={(e) => setEditUser({ ...editUser, name: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <input
+                  type="email"
+                  required
+                  value={editUser.email}
+                  onChange={(e) => setEditUser({ ...editUser, email: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                <select
+                  value={editUser.role}
+                  onChange={(e) => setEditUser({ ...editUser, role: coerceRole(e.target.value) })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                >
+                  <option value="cashier">Cashier</option>
+                  <option value="manager">Manager</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Store</label>
+                <input
+                  type="text"
+                  disabled
+                  value={currentStoreLabel}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-600"
+                />
+              </div>
+
+              <div className="mt-6 flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingUserId(null);
+                    setError('');
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdating}
+                  className="px-4 py-2 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 disabled:opacity-50"
+                >
+                  {isUpdating ? 'Updating...' : 'Update User'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {passwordTargetUserId && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg w-full max-w-md mx-4">
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <h2 className="text-xl font-semibold text-gray-800">Reset Password</h2>
+              <button
+                onClick={() => {
+                  setPasswordTargetUserId(null);
+                  setError('');
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <XCircle size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleResetPassword} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+                <input
+                  type="text"
+                  required
+                  minLength={8}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                />
+              </div>
+
+              <p className="text-xs text-gray-500">Minimum 8 characters.</p>
+
+              <div className="mt-6 flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPasswordTargetUserId(null);
+                    setError('');
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isResettingPassword}
+                  className="px-4 py-2 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 disabled:opacity-50"
+                >
+                  {isResettingPassword ? 'Resetting...' : 'Reset Password'}
                 </button>
               </div>
             </form>
@@ -315,15 +571,13 @@ const UsersPage = () => {
               </button>
             </div>
             <div className="p-6 space-y-3">
-              <p className="text-sm text-gray-600">
-                Share these credentials with the new store user.
-              </p>
+              <p className="text-sm text-gray-600">Share these credentials with the new user.</p>
               <div className="rounded border p-3">
                 <div className="text-xs text-gray-500">Email</div>
                 <div className="font-medium text-gray-900">{createdCreds.email}</div>
               </div>
               <div className="rounded border p-3">
-                <div className="text-xs text-gray-500">Temporary Password</div>
+                <div className="text-xs text-gray-500">Password</div>
                 <div className="font-medium text-gray-900">{createdCreds.password}</div>
               </div>
             </div>

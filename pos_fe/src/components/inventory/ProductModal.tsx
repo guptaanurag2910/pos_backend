@@ -42,6 +42,21 @@ const ProductModal: React.FC<Props> = ({ product, categories = [], stores = [], 
   const resolvedStoreId = currentStoreId || stores[0]?.id;
   const resolvedStoreName = stores.find((s) => Number(s.id) === Number(resolvedStoreId))?.name || 'Current Store';
 
+  const pickLatestStoreStock = (stockRows: Array<Record<string, any>>, storeId?: number) => {
+    const rows = Array.isArray(stockRows) ? stockRows : [];
+    const scopedRows = storeId
+      ? rows.filter((row) => Number(row.store) === Number(storeId))
+      : rows;
+    if (!scopedRows.length) return rows[0];
+    const nonBatchRow = scopedRows.find((row) => !String(row.batch_number ?? '').trim());
+    if (nonBatchRow) return nonBatchRow;
+    return [...scopedRows].sort((a, b) => {
+      const aTime = new Date(a.updated_at || 0).getTime();
+      const bTime = new Date(b.updated_at || 0).getTime();
+      return bTime - aTime;
+    })[0];
+  };
+
   const getInitialFormData = (): ProductFormData => ({
     name: '',
     barcode: '',
@@ -69,9 +84,7 @@ const ProductModal: React.FC<Props> = ({ product, categories = [], stores = [], 
   useEffect(() => {
     if (product) {
       const stockRows = (product as any).stock_details || [];
-      const stock =
-        stockRows.find((row: any) => Number(row.store) === Number(resolvedStoreId)) ||
-        stockRows[0];
+      const stock = pickLatestStoreStock(stockRows, resolvedStoreId);
       setFormData({
         ...product,
         store: resolvedStoreId,

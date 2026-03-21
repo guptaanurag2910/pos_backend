@@ -10,6 +10,7 @@ class Store(models.Model):
     pincode = models.CharField(max_length=10)
     phone = models.CharField(max_length=15)
     email = models.EmailField(null=True, blank=True)
+    recovery_email = models.EmailField(unique=True, null=True, blank=True)
     
     gst_number = models.CharField(max_length=15, null=True, blank=True)
     pan_number = models.CharField(max_length=10, null=True, blank=True)

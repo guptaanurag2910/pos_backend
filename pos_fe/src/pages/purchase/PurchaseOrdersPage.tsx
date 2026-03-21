@@ -11,6 +11,7 @@ import {
 } from '../../service/purchaseService';
 import ProcurementFlowStepper from '../../components/purchase/ProcurementFlowStepper';
 import DeleteConfirmModal from '../../components/common/DeleteConfirmModal';
+import { useAuthStore } from '../../stores/authStore';
 
 const PurchaseOrdersPage = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -22,17 +23,29 @@ const PurchaseOrdersPage = () => {
     grnId?: number | null;
   }>>({});
   const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
+  const storeId = Number(user?.storeId || 0) || undefined;
 
   useEffect(() => {
     const loadData = async () => {
       try {
+        const scopeParams = {
+          page_size: 500,
+          ...(storeId ? { store: storeId } : {}),
+        };
         const [poRes, grnRes] = await Promise.all([
-          listPurchaseOrders({ page_size: 500 }),
-          listGRNs({ page_size: 500 }),
+          listPurchaseOrders(scopeParams),
+          listGRNs(scopeParams),
         ]);
 
-        const poList = Array.isArray(poRes?.results) ? poRes.results : [];
-        const grnList = Array.isArray(grnRes?.results) ? grnRes.results : [];
+        const poListRaw = Array.isArray(poRes?.results) ? poRes.results : [];
+        const grnListRaw = Array.isArray(grnRes?.results) ? grnRes.results : [];
+        const poList = storeId
+          ? poListRaw.filter((po: any) => Number(po.store) === storeId)
+          : poListRaw;
+        const grnList = storeId
+          ? grnListRaw.filter((grn: any) => Number(grn.store) === storeId)
+          : grnListRaw;
 
         setPurchaseOrders(poList);
 
@@ -56,7 +69,7 @@ const PurchaseOrdersPage = () => {
     };
 
     loadData();
-  }, []);
+  }, [storeId]);
 
   const confirmDelete = async () => {
     if (deleteId === null) return;

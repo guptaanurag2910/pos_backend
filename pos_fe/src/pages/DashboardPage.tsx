@@ -15,7 +15,10 @@ import {
   Target,
   Zap,
   Download,
-  ChevronDown
+  ChevronDown,
+  RotateCcw,
+  Clock,
+  CheckCircle
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -92,17 +95,43 @@ const DashboardCard = ({
 
 const DashboardPage = () => {
   const navigate = useNavigate();
-  const { dashboardData, isLoading, loadDashboardData, selectedTimeRange, setTimeRange } = useDashboardStore();
+  const {
+    dashboardData,
+    isLoading,
+    loadDashboardData,
+    selectedTimeRange,
+    setTimeRange,
+    setCustomDateRange,
+    customStartDate,
+    customEndDate,
+  } = useDashboardStore();
   const { settings, user } = useAuthStore();
   const isDarkMode = settings.general.theme === 'dark';
   const [selectedDashboard, setSelectedDashboard] = useState('overview');
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const getTodayIso = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  };
+  const [calendarStartDate, setCalendarStartDate] = useState(customStartDate || getTodayIso());
+  const [calendarEndDate, setCalendarEndDate] = useState(customEndDate || getTodayIso());
   const dashboardContentRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     loadDashboardData();
   }, [loadDashboardData]);
+
+  useEffect(() => {
+    if (customStartDate) setCalendarStartDate(customStartDate);
+    if (customEndDate) setCalendarEndDate(customEndDate);
+  }, [customStartDate, customEndDate]);
+
+  const applyCalendarFilter = () => {
+    if (!calendarStartDate || !calendarEndDate) return;
+    if (calendarStartDate > calendarEndDate) return;
+    setCustomDateRange(calendarStartDate, calendarEndDate);
+  };
 
   const handleDownloadStoreExcel = async () => {
     setIsExporting(true);
@@ -145,6 +174,7 @@ const DashboardPage = () => {
       const tabDefs = [
         { id: 'overview', title: 'Overview' },
         { id: 'sales', title: 'Sales Analytics' },
+        { id: 'returns', title: 'Returns & Refunds' },
         { id: 'inventory', title: 'Inventory' },
         { id: 'customers', title: 'Customers' },
         { id: 'performance', title: 'Performance' },
@@ -243,6 +273,7 @@ const DashboardPage = () => {
   const dashboardTabs = [
     { id: 'overview', name: 'Overview', icon: <BarChart3 size={18} /> },
     { id: 'sales', name: 'Sales Analytics', icon: <IndianRupee size={18} /> },
+    { id: 'returns', name: 'Returns & Refunds', icon: <RotateCcw size={18} /> },
     { id: 'inventory', name: 'Inventory', icon: <Package size={18} /> },
     { id: 'customers', name: 'Customers', icon: <Users size={18} /> },
     { id: 'performance', name: 'Performance', icon: <Activity size={18} /> },
@@ -334,6 +365,65 @@ const DashboardPage = () => {
         backgroundColor: isDarkMode ? 'rgba(34, 197, 94, 0.8)' : 'rgba(34, 197, 94, 0.8)',
         borderColor: isDarkMode ? 'rgba(34, 197, 94, 1)' : 'rgba(34, 197, 94, 1)',
         borderWidth: 2,
+        borderRadius: 8,
+      },
+    ],
+  };
+
+  const returnsSummary = (dashboardData as any).returnsSummary || {};
+  const returnsTrendRows = (dashboardData as any).returnsTrend || [];
+  const refundMethodRows = (dashboardData as any).refundMethods || [];
+  const topReturnReasonRows = (dashboardData as any).topReturnReasons || [];
+  const recentReturnRows = (dashboardData as any).recentReturns || [];
+
+  const returnsTrendData = {
+    labels: returnsTrendRows.map((row: any) => {
+      const value = row.period || '';
+      const date = value ? new Date(value) : null;
+      return date && !Number.isNaN(date.getTime())
+        ? date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+        : value;
+    }),
+    datasets: [
+      {
+        label: 'Refund Amount',
+        data: returnsTrendRows.map((row: any) => row.refund || 0),
+        borderColor: isDarkMode ? 'rgba(239, 68, 68, 1)' : 'rgba(220, 38, 38, 1)',
+        backgroundColor: isDarkMode ? 'rgba(239, 68, 68, 0.15)' : 'rgba(220, 38, 38, 0.12)',
+        fill: true,
+        tension: 0.35,
+      },
+    ],
+  };
+
+  const refundMethodsData = {
+    labels: refundMethodRows.map((row: any) =>
+      String(row.method || 'unknown').replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    ),
+    datasets: [
+      {
+        data: refundMethodRows.map((row: any) => row.amount || 0),
+        backgroundColor: [
+          'rgba(59, 130, 246, 0.8)',
+          'rgba(34, 197, 94, 0.8)',
+          'rgba(251, 191, 36, 0.8)',
+          'rgba(239, 68, 68, 0.8)',
+          'rgba(168, 85, 247, 0.8)',
+        ],
+        borderWidth: 0,
+      },
+    ],
+  };
+
+  const returnReasonData = {
+    labels: topReturnReasonRows.slice(0, 6).map((row: any) => row.reason || 'Unspecified'),
+    datasets: [
+      {
+        label: 'Return Count',
+        data: topReturnReasonRows.slice(0, 6).map((row: any) => row.count || 0),
+        backgroundColor: isDarkMode ? 'rgba(251, 191, 36, 0.8)' : 'rgba(245, 158, 11, 0.8)',
+        borderColor: isDarkMode ? 'rgba(251, 191, 36, 1)' : 'rgba(245, 158, 11, 1)',
+        borderWidth: 1,
         borderRadius: 8,
       },
     ],
@@ -583,6 +673,103 @@ const DashboardPage = () => {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderReturnsDashboard = () => (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <DashboardCard
+          title="Total Returns"
+          value={Number(returnsSummary.totalReturns || 0).toString()}
+          icon={<RotateCcw size={24} className="text-white" />}
+          iconBgColor="bg-gradient-to-br from-red-500 to-red-600"
+        />
+        <DashboardCard
+          title="Completed Refunds"
+          value={Number(returnsSummary.completedReturns || 0).toString()}
+          icon={<CheckCircle size={24} className="text-white" />}
+          iconBgColor="bg-gradient-to-br from-green-500 to-green-600"
+        />
+        <DashboardCard
+          title="Pending Returns"
+          value={Number(returnsSummary.pendingReturns || 0).toString()}
+          icon={<Clock size={24} className="text-white" />}
+          iconBgColor="bg-gradient-to-br from-yellow-500 to-yellow-600"
+        />
+        <DashboardCard
+          title="Total Refund Amount"
+          value={`₹${Number(returnsSummary.totalRefundAmount || 0).toLocaleString('en-IN')}`}
+          icon={<IndianRupee size={24} className="text-white" />}
+          iconBgColor="bg-gradient-to-br from-blue-500 to-blue-600"
+          trend={{
+            value: `${Number(returnsSummary.refundRate || 0).toFixed(1)}% of completed sales`,
+            isPositive: false,
+          }}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Refund Trend</h2>
+          <div className="h-80">
+            {returnsTrendRows.length ? (
+              <Line data={returnsTrendData} options={chartOptions} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">No return trend data</div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Refund Methods</h2>
+          <div className="h-80">
+            {refundMethodRows.length ? (
+              <Doughnut data={refundMethodsData} options={{ ...chartOptions, cutout: '55%' }} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">No refund method data</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Top Return Reasons</h2>
+          <div className="h-80">
+            {topReturnReasonRows.length ? (
+              <Bar data={returnReasonData} options={chartOptions} />
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">No return reason data</div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Recent Returns</h2>
+          <div className="space-y-3">
+            {!recentReturnRows.length && (
+              <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg text-sm text-gray-500 dark:text-gray-400">
+                No recent return records for selected range.
+              </div>
+            )}
+            {recentReturnRows.slice(0, 6).map((row: any) => (
+              <div key={row.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                <div>
+                  <p className="font-medium text-gray-800 dark:text-gray-100">{row.returnNumber}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {row.billNumber || 'N/A'} • {row.customerName || 'Walk-in Customer'}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="font-semibold text-gray-800 dark:text-gray-100">₹{Number(row.refundAmount || 0).toFixed(2)}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">{String(row.status || '').replaceAll('_', ' ')}</p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -959,6 +1146,7 @@ const DashboardPage = () => {
     switch (selectedDashboard) {
       case 'overview': return renderOverviewDashboard();
       case 'sales': return renderSalesDashboard();
+      case 'returns': return renderReturnsDashboard();
       case 'inventory': return renderInventoryDashboard();
       case 'customers': return renderCustomersDashboard();
       case 'performance': return renderPerformanceDashboard();
@@ -980,18 +1168,51 @@ const DashboardPage = () => {
           </p>
         </div>
         
-        <div className="mt-4 sm:mt-0 flex items-center gap-2">
+        <div className="mt-4 sm:mt-0 flex flex-wrap items-center gap-2">
           <select
             value={selectedTimeRange}
-            onChange={(e) => setTimeRange(e.target.value)}
+            onChange={(e) => {
+              const value = e.target.value;
+              if (value === 'today') {
+                const today = getTodayIso();
+                setCalendarStartDate(today);
+                setCalendarEndDate(today);
+              }
+              setTimeRange(value);
+            }}
             className="px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-gray-900 dark:text-gray-100"
           >
             <option value="alltime">All time</option>
+            <option value="today">Today</option>
             <option value="last30days">Last 30 days</option>
             <option value="last7days">Last 7 days</option>
             <option value="last90days">Last 90 days</option>
             <option value="thisyear">This year</option>
+            <option value="custom">Custom range</option>
           </select>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={calendarStartDate}
+              onChange={(e) => setCalendarStartDate(e.target.value)}
+              className="px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-gray-900 dark:text-gray-100"
+            />
+            <span className="text-gray-500 dark:text-gray-400 text-sm">to</span>
+            <input
+              type="date"
+              value={calendarEndDate}
+              onChange={(e) => setCalendarEndDate(e.target.value)}
+              className="px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-gray-900 dark:text-gray-100"
+            />
+            <button
+              onClick={applyCalendarFilter}
+              disabled={!calendarStartDate || !calendarEndDate || calendarStartDate > calendarEndDate}
+              className="px-3 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Apply
+            </button>
+          </div>
 
           <div className="relative">
             <button

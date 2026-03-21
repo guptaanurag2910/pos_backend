@@ -217,9 +217,13 @@ class BillItem(models.Model):
         tax_rate = Decimal(self.tax_rate)
         discount_rate = Decimal(self.discount_rate)
 
-        self.tax_amount = self.price * quantity * (tax_rate / Decimal('100'))
-        self.discount_amount = self.price * quantity * (discount_rate / Decimal('100'))
-        self.total = (self.price * quantity) + self.tax_amount - self.discount_amount
+        # Price is treated as pre-tax unit price snapshot at billing time.
+        # Apply line discount first, then compute tax on the discounted taxable value.
+        line_base = self.price * quantity
+        self.discount_amount = line_base * (discount_rate / Decimal('100'))
+        taxable_value = line_base - self.discount_amount
+        self.tax_amount = taxable_value * (tax_rate / Decimal('100'))
+        self.total = taxable_value + self.tax_amount
 
         super().save(*args, **kwargs)
 

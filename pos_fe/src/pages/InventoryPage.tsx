@@ -4,6 +4,7 @@ import {
   listCategories,
   adjustProductStock,
   createProduct,
+  getProduct,
   updateProduct,
   deleteProduct,
   downloadInventorySheet,
@@ -43,6 +44,21 @@ const InventoryPage = () => {
   const user = useAuthStore((state) => state.user);
   const storeId = Number(user?.storeId || 0) || undefined;
 
+  const pickLatestStoreStock = (stockRows: Array<Record<string, any>>, targetStoreId?: number) => {
+    const rows = Array.isArray(stockRows) ? stockRows : [];
+    const scopedRows = targetStoreId
+      ? rows.filter((row) => Number(row.store) === Number(targetStoreId))
+      : rows;
+    if (!scopedRows.length) return rows[0];
+    const nonBatchRow = scopedRows.find((row) => !String(row.batch_number ?? '').trim());
+    if (nonBatchRow) return nonBatchRow;
+    return [...scopedRows].sort((a, b) => {
+      const aTime = new Date(a.updated_at || 0).getTime();
+      const bTime = new Date(b.updated_at || 0).getTime();
+      return bTime - aTime;
+    })[0];
+  };
+
   const fetchData = async (nextPage = 1, append = false) => {
     try {
       if (append) setIsLoadingMore(true);
@@ -51,6 +67,7 @@ const InventoryPage = () => {
       const prodResponse = await listProducts({
         search: searchQuery,
         category: categoryFilter || undefined,
+        store: storeId,
         page: nextPage,
         page_size: 40,
         stock_status: searchQuery.trim() ? 'all' : statusFilter,
@@ -359,8 +376,13 @@ const InventoryPage = () => {
 
       <ProductTable
         products={products}
-        onView={(product) => {
-          setViewingProduct(product);
+        onView={async (product) => {
+          try {
+            const latest = await getProduct(product.id);
+            setViewingProduct(latest);
+          } catch {
+            setViewingProduct(product);
+          }
         }}
         onEdit={(product) => {
           setSelectedProduct(product);
@@ -400,10 +422,7 @@ const InventoryPage = () => {
             </div>
             {(() => {
               const stockRows = (viewingProduct as any).stock_details || [];
-              const stock =
-                stockRows.find((row: any) => Number(row.store) === Number(storeId)) ||
-                stockRows[0] ||
-                {};
+              const stock = pickLatestStoreStock(stockRows, storeId) || {};
               return (
                 <div className="space-y-4 text-sm">
                   {viewingProduct.image ? (

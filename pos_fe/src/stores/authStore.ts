@@ -6,6 +6,8 @@ import {
   getProfile,
   listUsers,
   deleteUser,
+  patchUser,
+  resetUserPassword as resetUserPasswordAPI,
   signupAPI,
   signupWithStoreAPI,
 } from '../service/authService';
@@ -26,6 +28,7 @@ interface AuthStore extends AuthState {
       state: string;
       pincode: string;
       phone: string;
+      recovery_email: string;
       email?: string | null;
       is_main?: boolean;
       is_active?: boolean;
@@ -34,7 +37,9 @@ interface AuthStore extends AuthState {
   logout: () => void;
   loadUserFromToken: () => Promise<void>;
   loadUsers: () => Promise<void>;
-  addUser: (payload: { name: string; email: string; role: string; storeId?: string; password?: string }) => Promise<{ email: string; password: string }>;
+  addUser: (payload: { name: string; email: string; role: string; password?: string }) => Promise<{ email: string; password: string }>;
+  updateUserDetails: (userId: string, payload: { name: string; email: string; role: string }) => Promise<void>;
+  resetUserPassword: (userId: string, newPassword: string) => Promise<void>;
   toggleUserStatus: (userId: string) => Promise<void>;
   updateSettings: (settings: Partial<AuthState['settings']>) => void;
   toggleTheme: () => void;
@@ -141,7 +146,6 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       name: payload.name,
       email: payload.email,
       role: payload.role,
-      store: Number(get().user?.storeId || 0) || null,
       password: payload.password || 'Temp@12345',
     };
 
@@ -151,6 +155,19 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       email: res?.data?.credentials?.email || body.email,
       password: res?.data?.credentials?.password || body.password,
     };
+  },
+
+  updateUserDetails: async (userId, payload) => {
+    await patchUser(Number(userId), {
+      name: payload.name,
+      email: payload.email,
+      role: payload.role,
+    });
+    await get().loadUsers();
+  },
+
+  resetUserPassword: async (userId, newPassword) => {
+    await resetUserPasswordAPI(Number(userId), newPassword);
   },
 
   toggleUserStatus: async (userId: string) => {

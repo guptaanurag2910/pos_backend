@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { 
+import {
   LayoutDashboard, 
   ShoppingCart, 
   Package, 
@@ -21,6 +21,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { useAuthStore } from '../../stores/authStore';
+import { canShowSidebarTab } from '../../config/roleTabs';
 
 interface NavItemProps {
   to: string;
@@ -95,13 +96,16 @@ const Sidebar = () => {
 
   const isActive = (path: string) => location.pathname === path;
   const role = user?.role;
-  const canSeeDashboard = role === 'admin' || role === 'manager';
-  const canSeeInventory = role === 'admin' || role === 'manager';
-  const canSeePurchase = role === 'admin' || role === 'manager';
-  const canSeeCustomers = role === 'admin' || role === 'manager';
-  const canSeeReports = role === 'admin' || role === 'manager';
-  const canSeeSettings = role === 'admin';
-  const canSeeUsers = role === 'admin';
+  const canSeeDashboard = canShowSidebarTab(role, 'dashboard');
+  const canSeeBilling = canShowSidebarTab(role, 'billing');
+  const canSeeReturns = canShowSidebarTab(role, 'returns');
+  const canSeeInventory = canShowSidebarTab(role, 'inventory');
+  const canSeePurchase = canShowSidebarTab(role, 'purchase');
+  const canSeeCustomers = canShowSidebarTab(role, 'customers');
+  const canSeeReports = canShowSidebarTab(role, 'reports');
+  const canSeeInitialUpload = canShowSidebarTab(role, 'initialUpload');
+  const canSeeUsers = canShowSidebarTab(role, 'users');
+  const canSeeSettings = canShowSidebarTab(role, 'settings');
 
   return (
     <>
@@ -139,7 +143,7 @@ const Sidebar = () => {
           </button>
         </div>
 
-        <nav className="p-4 space-y-2 overflow-y-auto h-full pb-20">
+        <nav className="p-4 space-y-2 overflow-y-auto h-full">
           {canSeeDashboard && (
             <NavItem
               to="/dashboard"
@@ -149,20 +153,24 @@ const Sidebar = () => {
               onClick={closeMobileMenu}
             />
           )}
-          <NavItem
-            to="/billing"
-            icon={<ShoppingCart size={20} />}
-            label="Billing"
-            active={isActive('/billing')}
-            onClick={closeMobileMenu}
-          />
-          <NavItem
-            to="/returns"
-            icon={<RotateCcw size={20} />}
-            label="Returns & Refunds"
-            active={isActive('/returns')}
-            onClick={closeMobileMenu}
-          />
+          {canSeeBilling && (
+            <NavItem
+              to="/billing"
+              icon={<ShoppingCart size={20} />}
+              label="Billing"
+              active={isActive('/billing')}
+              onClick={closeMobileMenu}
+            />
+          )}
+          {canSeeReturns && (
+            <NavItem
+              to="/returns"
+              icon={<RotateCcw size={20} />}
+              label="Returns & Refunds"
+              active={isActive('/returns')}
+              onClick={closeMobileMenu}
+            />
+          )}
           {canSeeInventory && (
             <NavItem
               to="/inventory"
@@ -232,7 +240,7 @@ const Sidebar = () => {
               onClick={closeMobileMenu}
             />
           )}
-          {canSeeUsers && (
+          {canSeeInitialUpload && (
             <NavItem
               to="/initial-upload"
               icon={<UploadCloud size={20} />}
@@ -261,17 +269,6 @@ const Sidebar = () => {
           )}
         </nav>
 
-        <div className="absolute bottom-0 w-full p-4 border-t dark:border-gray-700">
-          <div className="flex items-center space-x-3">
-            <div className="h-10 w-10 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center text-primary-600 dark:text-primary-400 font-bold">
-              {user?.name.charAt(0)}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-700 dark:text-gray-200 truncate">{user?.name}</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{user?.email}</p>
-            </div>
-          </div>
-        </div>
       </aside>
 
       {/* Overlay for mobile */}

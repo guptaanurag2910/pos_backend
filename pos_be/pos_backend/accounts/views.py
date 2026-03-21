@@ -1,4 +1,6 @@
 import logging
+import secrets
+from datetime import timedelta
 
 from rest_framework import status, viewsets, generics
 from rest_framework.response import Response
@@ -8,6 +10,9 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import make_password, check_password
+from django.core.mail import send_mail
+from django.conf import settings
 from django.utils import timezone
 from django.utils.crypto import get_random_string
 from django.db import transaction
@@ -15,15 +20,18 @@ from django.db import transaction
 from .serializers import (
     UserSerializer, CustomTokenObtainPairSerializer, ChangePasswordSerializer, 
     UserSessionSerializer, AuditLogSerializer, LogoutSerializer, RegistrationSerializer,
-    RegistrationWithStoreSerializer
+    RegistrationWithStoreSerializer, ForgotPasswordOTPRequestSerializer,
+    ForgotPasswordOTPConfirmSerializer
 )
-from .models import UserSession, AuditLog
+from .models import UserSession, AuditLog, PasswordResetOTP
 from .permissions import IsAdminUser, IsManagerUser, IsOwnerOrAdmin
 from .utils import get_client_ip, get_user_agent
-from .throttles import LoginRateThrottle
+from .throttles import LoginRateThrottle, ForgotPasswordRequestThrottle, ForgotPasswordVerifyThrottle
 
 User = get_user_model()
 logger = logging.getLogger('accounts')
+GENERIC_FORGOT_PASSWORD_MESSAGE = "If the account exists, an OTP has been sent to the store recovery email."
+INVALID_OR_EXPIRED_OTP_MESSAGE = "Invalid or expired OTP."
 
 
 class RegisterView(generics.CreateAPIView):
@@ -77,7 +85,13 @@ class CustomTokenObtainPairView(TokenObtainPairView):
         logger.info(f"login_requested email={request.data.get('email')}")
         response = super().post(request, *args, **kwargs)
         if response.status_code == status.HTTP_200_OK:
-            user = User.objects.get(email=request.data['email'])
+            user_id = response.data.get('user_id')
+            user = User.objects.filter(id=user_id).first()
+            if not user:
+                logger.warning(
+                    f"login_completed_missing_user email={request.data.get('email')} user_id={user_id}"
+                )
+                return response
             user.last_login = timezone.now()
             user.save(update_fields=['last_login'])
             
@@ -145,6 +159,151 @@ class LogoutView(generics.GenericAPIView):
         except Exception as e:
             logger.warning(f"logout_failed_graceful user_id={getattr(actor, 'id', None)} error={str(e)}")
             return Response({"detail": "Successfully logged out."}, status=status.HTTP_200_OK)
+
+
+class ForgotPasswordRequestOTPView(generics.GenericAPIView):
+    serializer_class = ForgotPasswordOTPRequestSerializer
+    permission_classes = [AllowAny]
+    throttle_classes = [ForgotPasswordRequestThrottle]
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data['email']
+        logger.info(f"forgot_password_request_otp_requested email={email}")
+
+        user = User.objects.filter(email__iexact=email, is_active=True).select_related('store').first()
+        if not user or not user.store or not user.store.recovery_email:
+            logger.info(f"forgot_password_request_otp_noop email={email} reason=no_user_or_store_or_recovery_email")
+            return Response({"detail": GENERIC_FORGOT_PASSWORD_MESSAGE}, status=status.HTTP_200_OK)
+
+        now = timezone.now()
+        PasswordResetOTP.objects.filter(user=user, is_used=False, expires_at__gt=now).update(is_used=True)
+
+        otp = f"{secrets.randbelow(1000000):06d}"
+        otp_record = PasswordResetOTP.objects.create(
+            user=user,
+            otp_hash=make_password(otp),
+            expires_at=now + timedelta(minutes=10),
+        )
+
+        from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@billsathi.local')
+        subject = "BillSathi password reset OTP"
+        message = (
+            f"Your OTP for password reset is: {otp}\n\n"
+            f"This OTP is valid for 10 minutes.\n"
+            f"If you did not request this, please ignore this email."
+        )
+        sent = False
+        try:
+            send_mail(subject, message, from_email, [user.store.recovery_email], fail_silently=False)
+            sent = True
+        except Exception as exc:
+            logger.warning(
+                f"forgot_password_request_otp_email_failed email={email} recovery_email={user.store.recovery_email} error={exc}"
+            )
+
+        AuditLog.objects.create(
+            user=user,
+            action='other',
+            model_name='PasswordResetOTP',
+            object_id=str(otp_record.id),
+            object_repr=f"Password reset OTP for {user.email}",
+            ip_address=get_client_ip(request),
+            details={
+                'action': 'forgot_password_request_otp',
+                'sent': sent,
+            },
+        )
+
+        logger.info(
+            f"forgot_password_request_otp_completed email={email} store_id={user.store_id} sent={sent}"
+        )
+        return Response({"detail": GENERIC_FORGOT_PASSWORD_MESSAGE}, status=status.HTTP_200_OK)
+
+
+class ForgotPasswordConfirmOTPView(generics.GenericAPIView):
+    serializer_class = ForgotPasswordOTPConfirmSerializer
+    permission_classes = [AllowAny]
+    throttle_classes = [ForgotPasswordVerifyThrottle]
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data['email']
+        otp = serializer.validated_data['otp']
+        new_password = serializer.validated_data['new_password']
+        logger.info(f"forgot_password_confirm_otp_requested email={email}")
+
+        user = User.objects.filter(email__iexact=email, is_active=True).first()
+        if not user:
+            logger.info(f"forgot_password_confirm_otp_failed email={email} reason=user_not_found")
+            return Response({"detail": INVALID_OR_EXPIRED_OTP_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
+
+        otp_record = PasswordResetOTP.objects.filter(user=user, is_used=False).order_by('-created_at').first()
+        now = timezone.now()
+        if not otp_record:
+            logger.info(f"forgot_password_confirm_otp_failed email={email} reason=otp_not_found")
+            return Response({"detail": INVALID_OR_EXPIRED_OTP_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
+
+        if otp_record.expires_at <= now:
+            otp_record.is_used = True
+            otp_record.save(update_fields=['is_used', 'updated_at'])
+            logger.info(f"forgot_password_confirm_otp_failed email={email} reason=otp_expired")
+            return Response({"detail": INVALID_OR_EXPIRED_OTP_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
+
+        if otp_record.attempts >= otp_record.max_attempts:
+            otp_record.is_used = True
+            otp_record.save(update_fields=['is_used', 'updated_at'])
+            logger.info(f"forgot_password_confirm_otp_failed email={email} reason=max_attempts_reached")
+            return Response({"detail": INVALID_OR_EXPIRED_OTP_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not check_password(otp, otp_record.otp_hash):
+            otp_record.attempts += 1
+            if otp_record.attempts >= otp_record.max_attempts:
+                otp_record.is_used = True
+                otp_record.save(update_fields=['attempts', 'is_used', 'updated_at'])
+            else:
+                otp_record.save(update_fields=['attempts', 'updated_at'])
+            logger.info(
+                f"forgot_password_confirm_otp_failed email={email} reason=otp_mismatch attempts={otp_record.attempts}"
+            )
+            return Response({"detail": INVALID_OR_EXPIRED_OTP_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            user.set_password(new_password)
+            user.save(update_fields=['password'])
+
+            otp_record.is_used = True
+            otp_record.save(update_fields=['is_used', 'updated_at'])
+
+            active_sessions = UserSession.objects.filter(user=user, is_active=True)
+            session_count = active_sessions.count()
+            for session in active_sessions:
+                try:
+                    token = RefreshToken(session.session_key)
+                    token.blacklist()
+                except Exception:
+                    pass
+            active_sessions.update(logout_time=now, is_active=False)
+
+            AuditLog.objects.create(
+                user=user,
+                action='update',
+                model_name='User',
+                object_id=str(user.id),
+                object_repr=str(user),
+                ip_address=get_client_ip(request),
+                details={
+                    'action': 'forgot_password_confirm_otp',
+                    'session_logout_count': session_count,
+                },
+            )
+
+        logger.info(
+            f"forgot_password_confirm_otp_completed email={email} user_id={user.id}"
+        )
+        return Response({"detail": "Password reset successfully."}, status=status.HTTP_200_OK)
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()

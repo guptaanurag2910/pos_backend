@@ -71,6 +71,8 @@ const BillingPage = () => {
         items: currentBill.items.map((item) => ({
           product_id: item.productId,
           quantity: item.quantity,
+          rate: Number((item as any).rate ?? item.price),
+          tax_rate: Number(item.tax || 0),
           discount_rate: item.discountRate || 0,
         })),
       };
@@ -348,7 +350,9 @@ const BillingPage = () => {
                   productId: item.product,
                   productName: item.product_name,
                   quantity: parseFloat(item.quantity),
-                  price: parseFloat(item.price),
+                  price: parseFloat(item.price) * (1 + parseFloat(item.tax_rate || '0') / 100),
+                  rate: parseFloat(item.price) * (1 + parseFloat(item.tax_rate || '0') / 100),
+                  tax: parseFloat(item.tax_rate || '0'),
                   taxRate: parseFloat(item.tax_rate),
                   taxAmount: parseFloat(item.tax_amount),
                   discountRate: parseFloat(item.discount_rate),

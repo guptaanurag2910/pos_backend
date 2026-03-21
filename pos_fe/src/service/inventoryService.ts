@@ -67,6 +67,7 @@ export const deleteCategory = async (id: number) => {
 interface ProductFilterParams {
   search?: string;
   category?: number;
+  store?: number;
   page?: number;
   page_size?: number;
   in_stock_only?: boolean;
@@ -78,6 +79,7 @@ export const listProducts = async (params: ProductFilterParams = {}) => {
   const cleanParams: Record<string, string | number> = {};
   if (params.search) cleanParams.search = params.search;
   if (params.category) cleanParams.category = params.category;
+  if (params.store) cleanParams.store = params.store;
   if (params.page) cleanParams.page = params.page;
   if (params.page_size) cleanParams.page_size = params.page_size;
   if (typeof params.in_stock_only === 'boolean') {

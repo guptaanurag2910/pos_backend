@@ -9,6 +9,8 @@ from .views import (
     AuditLogViewSet,
     RegisterView,
     RegisterWithStoreView,
+    ForgotPasswordRequestOTPView,
+    ForgotPasswordConfirmOTPView,
 )
 
 router = DefaultRouter()
@@ -23,4 +25,6 @@ urlpatterns = [
     path('token/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('logout/', LogoutView.as_view(), name='logout'),
+    path('password-reset/request-otp/', ForgotPasswordRequestOTPView.as_view(), name='password_reset_request_otp'),
+    path('password-reset/confirm-otp/', ForgotPasswordConfirmOTPView.as_view(), name='password_reset_confirm_otp'),
 ]

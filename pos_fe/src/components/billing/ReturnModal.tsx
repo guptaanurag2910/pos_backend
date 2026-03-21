@@ -13,6 +13,7 @@ interface ReturnItem {
   returnQuantity: number;
   unitPrice: number;
   tax: number;
+  discountRate: number;
   reason: string;
   condition: 'good' | 'damaged' | 'defective' | 'expired';
   refundAmount: number;
@@ -151,6 +152,7 @@ const ReturnModal = ({ isOpen, onClose, onSave, selectedBill, completedBills }: 
           returnQuantity: 0,
           unitPrice: parseFloat(item.price),
           tax: parseFloat(item.tax_rate),
+          discountRate: parseFloat(item.discount_rate || '0'),
           reason: '',
           condition: 'good',
           refundAmount: 0,
@@ -167,8 +169,17 @@ const ReturnModal = ({ isOpen, onClose, onSave, selectedBill, completedBills }: 
   }, [formData.items]);
 
   const calculateTotals = () => {
-    const subtotal = formData.items.reduce((sum, item) => sum + item.returnQuantity * item.unitPrice, 0);
-    const taxTotal = formData.items.reduce((sum, item) => sum + (item.returnQuantity * item.unitPrice * item.tax) / 100, 0);
+    const subtotal = formData.items.reduce((sum, item) => {
+      const base = item.returnQuantity * item.unitPrice;
+      const discountAmount = base * ((item.discountRate || 0) / 100);
+      return sum + (base - discountAmount);
+    }, 0);
+    const taxTotal = formData.items.reduce((sum, item) => {
+      const base = item.returnQuantity * item.unitPrice;
+      const discountAmount = base * ((item.discountRate || 0) / 100);
+      const taxableValue = base - discountAmount;
+      return sum + (taxableValue * item.tax) / 100;
+    }, 0);
     setFormData((prev) => ({ ...prev, subtotal, taxTotal, refundAmount: subtotal + taxTotal }));
   };
 
@@ -179,8 +190,10 @@ const ReturnModal = ({ isOpen, onClose, onSave, selectedBill, completedBills }: 
     if (field === 'returnQuantity') {
       const item = updatedItems[index];
       const itemSubtotal = item.returnQuantity * item.unitPrice;
-      const itemTax = (itemSubtotal * item.tax) / 100;
-      updatedItems[index].refundAmount = itemSubtotal + itemTax;
+      const discountAmount = itemSubtotal * ((item.discountRate || 0) / 100);
+      const taxableValue = itemSubtotal - discountAmount;
+      const itemTax = (taxableValue * item.tax) / 100;
+      updatedItems[index].refundAmount = taxableValue + itemTax;
     }
 
     setFormData((prev) => ({ ...prev, items: updatedItems }));

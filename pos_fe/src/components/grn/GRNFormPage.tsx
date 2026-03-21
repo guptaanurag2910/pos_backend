@@ -12,6 +12,7 @@ import { useSearchParams } from 'react-router-dom';
 import toast, { Toaster } from 'react-hot-toast';
 import GRNItemsEditor from './GRNItemsEditor';
 import ProcurementFlowStepper from '../purchase/ProcurementFlowStepper';
+import { useAuthStore } from '../../stores/authStore';
 
 interface Props {
   grnId?: number;
@@ -36,6 +37,8 @@ const GRNFormPage = ({ grnId }: Props) => {
   const [searchParams] = useSearchParams();
   const directReceiptMode = String(searchParams.get('mode') || '').toLowerCase() === 'direct_receipt';
   const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
+  const storeId = Number(user?.storeId || 0) || undefined;
 
   const [summary, setSummary] = useState({
     subtotal: 0,
@@ -49,10 +52,16 @@ const GRNFormPage = ({ grnId }: Props) => {
       try {
         const [supplierList, poRes] = await Promise.all([
           listSuppliers(),
-          listPurchaseOrders({ page_size: 500 }),
+          listPurchaseOrders({
+            page_size: 500,
+            ...(storeId ? { store: storeId } : {}),
+          }),
         ]);
         setSuppliers(supplierList);
-        const poList = Array.isArray(poRes?.results) ? poRes.results : [];
+        const poListRaw = Array.isArray(poRes?.results) ? poRes.results : [];
+        const poList = storeId
+          ? poListRaw.filter((po: any) => Number(po.store) === storeId)
+          : poListRaw;
         setPurchaseOrders(poList);
 
         if (grnId) {
@@ -79,6 +88,10 @@ const GRNFormPage = ({ grnId }: Props) => {
 
         const poFromQuery = Number(searchParams.get('po'));
         if (Number.isInteger(poFromQuery) && poFromQuery > 0) {
+          if (storeId && !poList.some((po: any) => Number(po.id) === poFromQuery)) {
+            toast.error('Selected PO is not available for your store');
+            return;
+          }
           await handlePurchaseOrderSelect(poFromQuery);
         }
       } catch (error) {
@@ -88,7 +101,7 @@ const GRNFormPage = ({ grnId }: Props) => {
 
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [grnId, searchParams]);
+  }, [grnId, searchParams, storeId]);
 
   useEffect(() => {
     let subtotal = 0;

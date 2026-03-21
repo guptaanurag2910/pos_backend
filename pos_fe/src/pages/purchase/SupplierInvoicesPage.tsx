@@ -26,6 +26,7 @@ import {
   deleteSupplierInvoice,
   updateSupplierInvoice,
 } from '../../service/purchaseService';
+import { useAuthStore } from '../../stores/authStore';
 
 const toNumber = (value: unknown) => {
   const n = Number(value);
@@ -100,6 +101,8 @@ const SupplierInvoicesPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [entryMode, setEntryMode] = useState<'standard' | 'direct_receipt' | 'direct_invoice'>('standard');
+  const user = useAuthStore((state) => state.user);
+  const storeId = Number(user?.storeId || 0) || undefined;
   const queryPoId = Number(searchParams.get('po'));
   const queryGrnId = Number(searchParams.get('grn'));
   const queryEditInvoiceId = Number(searchParams.get('edit'));
@@ -107,12 +110,20 @@ const SupplierInvoicesPage = () => {
   const loadInvoices = async () => {
     setIsLoading(true);
     try {
+      const scopeParams = {
+        page_size: 500,
+        ...(storeId ? { store: storeId } : {}),
+      };
       const [invoiceResponse, suppliersResponse, paymentsResponse] = await Promise.all([
-        listSupplierInvoices({ page_size: 500 }),
+        listSupplierInvoices(scopeParams),
         listSuppliers(),
-        listSupplierPayments({ page_size: 500 }),
+        listSupplierPayments(scopeParams),
       ]);
-      const invoices = extractList(invoiceResponse).map(normalizeInvoice);
+      const invoiceRowsRaw = extractList(invoiceResponse);
+      const invoiceRows = storeId
+        ? invoiceRowsRaw.filter((invoice: any) => Number(invoice.store) === storeId)
+        : invoiceRowsRaw;
+      const invoices = invoiceRows.map(normalizeInvoice);
       const payments = extractList(paymentsResponse);
       setSupplierInvoices(invoices);
       setSuppliers(Array.isArray(suppliersResponse) ? suppliersResponse : []);
@@ -133,7 +144,7 @@ const SupplierInvoicesPage = () => {
 
   useEffect(() => {
     loadInvoices();
-  }, []);
+  }, [storeId]);
 
   useEffect(() => {
     const bootstrapFromQuery = async () => {
@@ -162,11 +173,21 @@ const SupplierInvoicesPage = () => {
         if (Number.isInteger(grnId) && grnId > 0) {
           resolvedGRN = await getGRN(grnId);
         } else if (Number.isInteger(poId) && poId > 0) {
-          const grnResponse = await listGRNs({ purchase_order: poId, page_size: 1, ordering: '-created_at' });
+          const grnResponse = await listGRNs({
+            purchase_order: poId,
+            page_size: 1,
+            ordering: '-created_at',
+            ...(storeId ? { store: storeId } : {}),
+          });
           const latestGRN = extractList(grnResponse)[0];
           if (latestGRN?.id) {
             resolvedGRN = await getGRN(Number(latestGRN.id));
           }
+        }
+
+        if (resolvedGRN && storeId && Number(resolvedGRN.store) !== storeId) {
+          toast.error('Selected GRN is not in your store scope');
+          return;
         }
 
         if (resolvedGRN) {
@@ -205,7 +226,7 @@ const SupplierInvoicesPage = () => {
     };
 
     bootstrapFromQuery();
-  }, [searchParams]);
+  }, [searchParams, storeId]);
 
   useEffect(() => {
     const editId = Number(searchParams.get('edit'));
@@ -335,7 +356,11 @@ const SupplierInvoicesPage = () => {
 
   const handleNewInvoiceFromGRN = async () => {
     try {
-      const grnResponse = await listGRNs({ page_size: 1, ordering: '-created_at' });
+      const grnResponse = await listGRNs({
+        page_size: 1,
+        ordering: '-created_at',
+        ...(storeId ? { store: storeId } : {}),
+      });
       const grn = extractList(grnResponse)[0];
       if (!grn?.id) {
         toast.error('No GRNs found');

@@ -65,9 +65,18 @@ const PaymentModal = ({
           .map((item) => ({
             product_id: item.productId,
             quantity: Number(item.quantity),
+            rate: Number((item as any).rate ?? item.price),
+            tax_rate: Number(item.tax || 0),
             discount_rate: Number(item.discountRate || 0),
           }))
-          .filter((item) => Number.isFinite(item.quantity) && item.quantity > 0 && !!item.product_id);
+          .filter(
+            (item) =>
+              Number.isFinite(item.quantity) &&
+              item.quantity > 0 &&
+              !!item.product_id &&
+              Number.isFinite(item.rate) &&
+              item.rate > 0
+          );
 
         if (validItems.length === 0) {
           setError('Cannot create bill without valid items.');

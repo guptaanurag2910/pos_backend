@@ -6,6 +6,8 @@ const SALES_URL = '/api/sales/';
 export interface BillItemPayload {
   product_id: number;
   quantity: number;
+  rate?: number;
+  tax_rate?: number;
   discount_rate?: number;
 }
 

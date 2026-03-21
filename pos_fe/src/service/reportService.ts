@@ -24,6 +24,41 @@ export interface DashboardData {
     quantity: number;
     amount: number;
   }[];
+  returnsSummary?: {
+    totalReturns: number;
+    pendingReturns: number;
+    approvedReturns: number;
+    completedReturns: number;
+    rejectedReturns: number;
+    totalRefundAmount: number;
+    averageRefundAmount: number;
+    refundRate: number;
+  };
+  returnsTrend?: Array<{
+    period: string;
+    count: number;
+    refund: number;
+  }>;
+  refundMethods?: Array<{
+    method: string;
+    count: number;
+    amount: number;
+  }>;
+  topReturnReasons?: Array<{
+    reason: string;
+    count: number;
+    amount: number;
+  }>;
+  recentReturns?: Array<{
+    id: number;
+    returnNumber: string;
+    billNumber: string | null;
+    customerName: string | null;
+    status: string;
+    refundAmount: number;
+    refundMethod: string;
+    returnDate: string | null;
+  }>;
 }
 
 export interface DashboardParams {

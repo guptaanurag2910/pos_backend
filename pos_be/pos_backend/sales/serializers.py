@@ -108,6 +108,10 @@ class BillItemCreateSerializer(serializers.Serializer):
     product_id = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all(), required=False)
     product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all(), required=False)
     quantity = serializers.DecimalField(max_digits=10, decimal_places=2)
+    # Tax-inclusive selling rate snapshot from frontend.
+    rate = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
+    # Tax rate snapshot from frontend; falls back to product tax.
+    tax_rate = serializers.DecimalField(max_digits=5, decimal_places=2, required=False)
     discount_rate = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=0)
 
     def validate(self, attrs):
@@ -118,6 +122,14 @@ class BillItemCreateSerializer(serializers.Serializer):
         quantity = attrs.get('quantity')
         if quantity is None or quantity <= 0:
             raise serializers.ValidationError({'quantity': 'Quantity must be greater than zero.'})
+
+        rate = attrs.get('rate')
+        if rate is not None and rate <= 0:
+            raise serializers.ValidationError({'rate': 'Rate must be greater than zero.'})
+
+        tax_rate = attrs.get('tax_rate')
+        if tax_rate is not None and (tax_rate < 0 or tax_rate > 100):
+            raise serializers.ValidationError({'tax_rate': 'tax_rate must be between 0 and 100.'})
 
         attrs['product'] = product
         attrs.pop('product_id', None)
@@ -230,13 +242,26 @@ class CreateBillSerializer(serializers.ModelSerializer):
                 product = item_data['product']
                 quantity = item_data['quantity']
                 discount_rate = item_data.get('discount_rate', 0)
+                tax_rate = item_data.get('tax_rate', product.tax)
+
+                # Frontend and product catalog rates are tax-inclusive.
+                # Persist pre-tax unit price in bill item for stable, consistent totals.
+                rate_inclusive = item_data.get('rate')
+                if rate_inclusive is None:
+                    rate_inclusive = product.discount_price if product.discount_price is not None else product.price
+
+                tax_multiplier = Decimal('1') + (Decimal(str(tax_rate)) / Decimal('100'))
+                if tax_multiplier <= 0:
+                    unit_price = Decimal(str(rate_inclusive))
+                else:
+                    unit_price = (Decimal(str(rate_inclusive)) / tax_multiplier).quantize(Decimal('0.01'))
 
                 item = BillItem(
                     bill=bill,
                     product=product,
                     quantity=quantity,
-                    price=product.price,
-                    tax_rate=product.tax,
+                    price=unit_price,
+                    tax_rate=tax_rate,
                     discount_rate=discount_rate
                 )
                 item.save()  # ✅ This triggers tax/total calculations

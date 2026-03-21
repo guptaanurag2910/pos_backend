@@ -1,3 +1,4 @@
+import axios from 'axios';
 import axiosInstance from '../utils/axiosInstance';
 
 const AUTH_URL = '/api/auth/';
@@ -26,6 +27,7 @@ export interface RegisterWithStorePayload {
     state: string;
     pincode: string;
     phone: string;
+    recovery_email: string;
     email?: string | null;
     is_main?: boolean;
     is_active?: boolean;
@@ -125,6 +127,59 @@ export const changePassword = async (
     old_password: oldPassword,
     new_password: newPassword,
   });
+};
+
+export const changePasswordWithCredentials = async (
+  email: string,
+  oldPassword: string,
+  newPassword: string
+) => {
+  const baseURL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/+$/, '');
+  const tokenRes = await axios.post(`${baseURL}${AUTH_URL}token/`, {
+    email,
+    password: oldPassword,
+  });
+  const access = tokenRes.data?.access;
+  const userId = tokenRes.data?.user_id;
+  if (!access || !userId) {
+    throw new Error('Unable to authenticate user for password change');
+  }
+
+  const res = await axios.post(
+    `${baseURL}${AUTH_URL}users/${userId}/change_password/`,
+    {
+      old_password: oldPassword,
+      new_password: newPassword,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${access}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+  return res.data;
+};
+
+export const resetUserPassword = async (userId: number, newPassword: string) => {
+  const res = await axiosInstance.post(`${AUTH_URL}users/${userId}/reset_password/`, {
+    new_password: newPassword,
+  });
+  return res.data;
+};
+
+export const requestPasswordResetOtp = async (email: string) => {
+  const res = await axiosInstance.post(`${AUTH_URL}password-reset/request-otp/`, { email });
+  return res.data;
+};
+
+export const confirmPasswordResetOtp = async (email: string, otp: string, newPassword: string) => {
+  const res = await axiosInstance.post(`${AUTH_URL}password-reset/confirm-otp/`, {
+    email,
+    otp,
+    new_password: newPassword,
+  });
+  return res.data;
 };
 
 export const getUserById = async (userId: number) => {

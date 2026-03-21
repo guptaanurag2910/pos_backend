@@ -182,7 +182,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
             has_stock_values = any(
                 value not in [None, '']
-                for value in [quantity, min_stock, max_stock, batch_number, expiry_date, store_id]
+                for value in [quantity, min_stock, max_stock, batch_number, expiry_date]
             )
             if has_stock_values:
                 entries.append({
@@ -201,18 +201,48 @@ class ProductViewSet(viewsets.ModelViewSet):
             quantity = self._parse_decimal(entry.get('quantity', entry.get('stock_quantity')), 'quantity')
             min_stock = self._parse_decimal(entry.get('min_stock'), 'min_stock')
             max_stock = self._parse_decimal(entry.get('max_stock'), 'max_stock')
-            batch_number = entry.get('batch_number') or None
+            batch_raw = entry.get('batch_number')
+            batch_number = (batch_raw.strip() if isinstance(batch_raw, str) else batch_raw) or None
             expiry_date = entry.get('expiry_date') or None
             store = self._resolve_store_for_stock(entry.get('store'))
             if not store:
                 raise ValidationError({"store": "No active store available for stock update"})
 
-            stock_level, _ = StockLevel.objects.get_or_create(
-                product=product,
-                store=store,
-                batch_number=batch_number,
-                defaults={'quantity': 0, 'expiry_date': expiry_date}
-            )
+            base_qs = StockLevel.objects.filter(product=product, store=store)
+            stock_levels_for_store = list(base_qs.order_by('-updated_at', '-id'))
+
+            def _normalize_batch(value):
+                if value is None:
+                    return None
+                if isinstance(value, str):
+                    value = value.strip()
+                    return value or None
+                value = str(value).strip()
+                return value or None
+
+            stock_level = None
+            if batch_number is not None:
+                for row in stock_levels_for_store:
+                    if _normalize_batch(row.batch_number) == batch_number:
+                        stock_level = row
+                        break
+            else:
+                # Product modal edits are store-level overwrite operations.
+                # Prefer the non-batch stock row for the store.
+                for row in stock_levels_for_store:
+                    if _normalize_batch(row.batch_number) is None:
+                        stock_level = row
+                        break
+
+            if stock_level is None:
+                stock_level = StockLevel.objects.create(
+                    product=product,
+                    store=store,
+                    batch_number=batch_number,
+                    quantity=0,
+                    expiry_date=expiry_date,
+                )
+                stock_levels_for_store.append(stock_level)
 
             old_quantity = Decimal(str(stock_level.quantity))
             if quantity is not None and quantity < 0:
@@ -241,19 +271,45 @@ class ProductViewSet(viewsets.ModelViewSet):
                     quantity=delta,
                     record_type='adjustment',
                     reference_id=f'PRODUCT-{product.id}',
-                    batch_number=batch_number,
+                    batch_number=stock_level.batch_number,
                     expiry_date=expiry_date,
                     notes='Product create/update stock set',
                     created_by=self.request.user
                 )
 
+            # For store-level overwrite (no batch provided), keep one effective row so
+            # current_stock and product view always reflect the latest edited value.
+            merged_rows = 0
+            if batch_number is None and quantity is not None:
+                for extra_row in stock_levels_for_store:
+                    if extra_row.id == stock_level.id:
+                        continue
+                    extra_old_quantity = Decimal(str(extra_row.quantity))
+                    if extra_old_quantity == 0:
+                        continue
+                    extra_row.quantity = 0
+                    extra_row.save(update_fields=['quantity', 'updated_at'])
+                    StockRecord.objects.create(
+                        product=product,
+                        store=store,
+                        quantity=-extra_old_quantity,
+                        record_type='adjustment',
+                        reference_id=f'PRODUCT-{product.id}',
+                        batch_number=extra_row.batch_number,
+                        expiry_date=extra_row.expiry_date,
+                        notes='Product create/update stock overwrite merge',
+                        created_by=self.request.user
+                    )
+                    merged_rows += 1
+
             applied.append({
                 'index': idx,
                 'store_id': store.id,
-                'batch_number': batch_number,
+                'batch_number': stock_level.batch_number,
                 'old_quantity': str(old_quantity),
                 'new_quantity': str(new_quantity),
                 'delta': str(delta),
+                'merged_rows': merged_rows,
             })
         return applied
     

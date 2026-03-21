@@ -135,22 +135,31 @@ const normalizeCustomer = (customer: any): Customer => ({
 
 const normalizeApiBill = (bill: any): Bill => {
   const items = Array.isArray(bill?.items)
-    ? bill.items.map((item: any) => ({
-        id: String(item.id),
-        productId: item.product,
-        productName: item.product_name || item.productName || '',
-        barcode: item.product_barcode || item.barcode || '',
-        quantity: toNumber(item.quantity),
-        price: toNumber(item.price),
-        mrp: toNumber(item.mrp ?? item.price),
-        rate: toNumber(item.rate ?? item.price),
-        tax: toNumber(item.tax_rate ?? item.tax),
-        discount: toNumber(item.discount_amount ?? 0),
-        discountRate: toNumber(item.discount_rate ?? 0),
-        discountType: 'percentage',
-        discountValue: toNumber(item.discount_rate ?? 0),
-        total: toNumber(item.total),
-      }))
+    ? bill.items.map((item: any) => {
+        const taxRate = toNumber(item.tax_rate ?? item.tax);
+        const unitPriceExTax = toNumber(item.price);
+        const rateInclusive = toNumber(
+          item.rate ?? (unitPriceExTax * (1 + taxRate / 100))
+        );
+
+        return {
+          id: String(item.id),
+          productId: item.product,
+          productName: item.product_name || item.productName || '',
+          barcode: item.product_barcode || item.barcode || '',
+          quantity: toNumber(item.quantity),
+          // POS UI treats displayed line rate as tax-inclusive.
+          price: rateInclusive,
+          mrp: toNumber(item.mrp ?? rateInclusive),
+          rate: rateInclusive,
+          tax: taxRate,
+          discount: toNumber(item.discount_amount ?? 0),
+          discountRate: toNumber(item.discount_rate ?? 0),
+          discountType: 'percentage',
+          discountValue: toNumber(item.discount_rate ?? 0),
+          total: toNumber(item.total),
+        };
+      })
     : [];
 
   return {

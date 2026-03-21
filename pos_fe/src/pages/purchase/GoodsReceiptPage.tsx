@@ -15,6 +15,7 @@ import { completeGRN, deleteGRN, listGRNs, listSupplierInvoices } from '../../se
 import toast from 'react-hot-toast';
 import ProcurementFlowStepper from '../../components/purchase/ProcurementFlowStepper';
 import DeleteConfirmModal from '../../components/common/DeleteConfirmModal';
+import { useAuthStore } from '../../stores/authStore';
 
 const GoodsReceiptPage = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -24,19 +25,31 @@ const GoodsReceiptPage = () => {
   const [invoiceMap, setInvoiceMap] = useState<Record<number, number | null>>({});
   const [completingId, setCompletingId] = useState<number | null>(null);
   const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
+  const storeId = Number(user?.storeId || 0) || undefined;
 
   useEffect(() => {
     loadGRNs();
-  }, []);
+  }, [storeId]);
 
   const loadGRNs = async () => {
     try {
+      const scopeParams = {
+        page_size: 500,
+        ...(storeId ? { store: storeId } : {}),
+      };
       const [grnRes, invoiceRes] = await Promise.all([
-        listGRNs({ page_size: 500 }),
-        listSupplierInvoices({ page_size: 500 }),
+        listGRNs(scopeParams),
+        listSupplierInvoices(scopeParams),
       ]);
-      const grnList = Array.isArray(grnRes?.results) ? grnRes.results : [];
-      const invoiceList = Array.isArray(invoiceRes?.results) ? invoiceRes.results : [];
+      const grnListRaw = Array.isArray(grnRes?.results) ? grnRes.results : [];
+      const invoiceListRaw = Array.isArray(invoiceRes?.results) ? invoiceRes.results : [];
+      const grnList = storeId
+        ? grnListRaw.filter((grn: any) => Number(grn.store) === storeId)
+        : grnListRaw;
+      const invoiceList = storeId
+        ? invoiceListRaw.filter((invoice: any) => Number(invoice.store) === storeId)
+        : invoiceListRaw;
       setGrnRecords(grnList);
 
       const nextMap: Record<number, number | null> = {};

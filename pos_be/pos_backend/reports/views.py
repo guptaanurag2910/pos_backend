@@ -5,6 +5,7 @@ from decimal import Decimal
 import logging
 
 import pandas as pd
+from django.apps import apps
 from django.db import connection
 from django.db.models import Avg, Count, F, Q, Sum, DecimalField, ExpressionWrapper, Min, Max
 from django.db.models.functions import TruncDate, TruncMonth, TruncWeek, TruncHour
@@ -339,6 +340,80 @@ class DashboardView(ReportBaseMixin, views.APIView):
             Q(quantity=0) | Q(quantity__lte=F('min_stock'))
         ).order_by('quantity')[:10]
 
+        # Return / refund analytics (dynamic model lookup because app label is "return")
+        ReturnModel = apps.get_model('return', 'Return')
+        returns_qs = ReturnModel.objects.filter(is_active=True)
+        if not all_time:
+            returns_qs = returns_qs.filter(return_date__gte=start_date, return_date__lte=end_date)
+        if self._is_global_admin(request) and request.query_params.get('store') and scope_store_id:
+            returns_qs = returns_qs.filter(bill__store_id=scope_store_id)
+        elif not self._is_global_admin(request) and scope_store_id:
+            returns_qs = returns_qs.filter(bill__store_id=scope_store_id)
+        elif not self._is_global_admin(request) and not scope_store_id:
+            returns_qs = returns_qs.none()
+
+        return_counts = returns_qs.aggregate(
+            total=Count('id'),
+            pending=Count('id', filter=Q(status='pending')),
+            approved=Count('id', filter=Q(status='approved')),
+            completed=Count('id', filter=Q(status='completed')),
+            rejected=Count('id', filter=Q(status='rejected')),
+        )
+        total_refund_value = returns_qs.filter(status='completed').aggregate(total=Sum('refund_amount')).get('total') or Decimal('0')
+        avg_refund_value = returns_qs.filter(status='completed').aggregate(avg=Avg('refund_amount')).get('avg') or Decimal('0')
+        completed_returns_count = int(return_counts.get('completed') or 0)
+        refund_rate = (completed_returns_count / total_orders * 100) if total_orders else 0.0
+
+        returns_trend = [
+            {
+                'period': row['return_date'].strftime('%Y-%m-%d') if row['return_date'] else None,
+                'count': row['count'],
+                'refund': float(row['refund'] or 0),
+            }
+            for row in returns_qs.values('return_date').annotate(
+                count=Count('id'),
+                refund=Sum('refund_amount', filter=Q(status='completed')),
+            ).order_by('return_date')
+        ]
+
+        refund_methods = [
+            {
+                'method': row['refund_method'],
+                'count': row['count'],
+                'amount': float(row['amount'] or 0),
+            }
+            for row in returns_qs.filter(status='completed').values('refund_method').annotate(
+                count=Count('id'),
+                amount=Sum('refund_amount'),
+            ).order_by('-amount')
+        ]
+
+        top_return_reasons = [
+            {
+                'reason': row['reason'] or 'Unspecified',
+                'count': row['count'],
+                'amount': float(row['amount'] or 0),
+            }
+            for row in returns_qs.values('reason').annotate(
+                count=Count('id'),
+                amount=Sum('refund_amount'),
+            ).order_by('-count', '-amount')[:10]
+        ]
+
+        recent_returns = [
+            {
+                'id': ret.id,
+                'returnNumber': ret.return_number,
+                'billNumber': ret.bill.bill_number if ret.bill else None,
+                'customerName': ret.customer_name,
+                'status': ret.status,
+                'refundAmount': float(ret.refund_amount or 0),
+                'refundMethod': ret.refund_method,
+                'returnDate': ret.return_date.strftime('%Y-%m-%d') if ret.return_date else None,
+            }
+            for ret in returns_qs.select_related('bill').order_by('-return_date', '-id')[:10]
+        ]
+
         logger.info(
             f"Dashboard computed user_id={request.user.id} start_date={start_date} end_date={end_date} "
             f"bills_count={bills.count()} total_orders={total_orders} total_items={inventory_totals.get('total_items') or 0}"
@@ -414,6 +489,20 @@ class DashboardView(ReportBaseMixin, views.APIView):
                 'seasonalIndex': None,
                 'forecastAccuracy': round(float(forecast_accuracy), 2),
             },
+            'returnsSummary': {
+                'totalReturns': int(return_counts.get('total') or 0),
+                'pendingReturns': int(return_counts.get('pending') or 0),
+                'approvedReturns': int(return_counts.get('approved') or 0),
+                'completedReturns': completed_returns_count,
+                'rejectedReturns': int(return_counts.get('rejected') or 0),
+                'totalRefundAmount': float(total_refund_value or 0),
+                'averageRefundAmount': float(avg_refund_value or 0),
+                'refundRate': round(refund_rate, 2),
+            },
+            'returnsTrend': returns_trend,
+            'refundMethods': refund_methods,
+            'topReturnReasons': top_return_reasons,
+            'recentReturns': recent_returns,
         })
         
 

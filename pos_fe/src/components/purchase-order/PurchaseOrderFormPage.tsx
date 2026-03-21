@@ -14,6 +14,7 @@ import { useNavigate } from 'react-router-dom';
 import toast, { Toaster } from 'react-hot-toast';
 import PurchaseOrderItemsEditor from './PurchaseOrderItemsEditor';
 import ProcurementFlowStepper from '../purchase/ProcurementFlowStepper';
+import { useAuthStore } from '../../stores/authStore';
 
 interface Props {
   poId?: number;
@@ -58,11 +59,18 @@ const PurchaseOrderFormPage = ({ poId }: Props) => {
     paymentId: null as number | null,
   });
   const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
+  const storeId = Number(user?.storeId || 0) || undefined;
 
   useEffect(() => {
     if (poId) {
       getPurchaseOrder(poId)
         .then((res) => {
+          if (storeId && Number(res.store) !== storeId) {
+            toast.error('This purchase order is outside your store scope');
+            navigate('/purchase/orders');
+            return;
+          }
           setForm({
             ...res,
             subtotal: Number(res.subtotal || 0),
@@ -77,7 +85,7 @@ const PurchaseOrderFormPage = ({ poId }: Props) => {
     }
     listSuppliers().then(setSuppliers).catch(console.error);
     listProducts({}).then((res) => setProducts(res.results)).catch(console.error);
-  }, [poId]);
+  }, [poId, storeId, navigate]);
 
   useEffect(() => {
     if (!poId) {
@@ -95,18 +103,25 @@ const PurchaseOrderFormPage = ({ poId }: Props) => {
 
     const loadWorkflow = async () => {
       try {
+        const scopeParams = storeId ? { store: storeId } : {};
         const [grnRes, invoiceRes, paymentRes] = await Promise.all([
-          listGRNs({ purchase_order: poId, page_size: 200 }),
-          listSupplierInvoices({ purchase_order: poId, page_size: 200 }),
-          listSupplierPayments({ purchase_order: poId, page_size: 200 }),
+          listGRNs({ purchase_order: poId, page_size: 200, ...scopeParams }),
+          listSupplierInvoices({ purchase_order: poId, page_size: 200, ...scopeParams }),
+          listSupplierPayments({ purchase_order: poId, page_size: 200, ...scopeParams }),
         ]);
 
-        const grns = Array.isArray(grnRes?.results) ? grnRes.results : Array.isArray(grnRes) ? grnRes : [];
-        const invoices = Array.isArray(invoiceRes?.results)
+        const grnRows = Array.isArray(grnRes?.results) ? grnRes.results : Array.isArray(grnRes) ? grnRes : [];
+        const invoiceRows = Array.isArray(invoiceRes?.results)
           ? invoiceRes.results
           : Array.isArray(invoiceRes)
             ? invoiceRes
             : [];
+        const grns = storeId
+          ? grnRows.filter((grn: any) => Number(grn.store) === storeId)
+          : grnRows;
+        const invoices = storeId
+          ? invoiceRows.filter((invoice: any) => Number(invoice.store) === storeId)
+          : invoiceRows;
         const payments = Array.isArray(paymentRes?.results)
           ? paymentRes.results
           : Array.isArray(paymentRes)
@@ -132,7 +147,7 @@ const PurchaseOrderFormPage = ({ poId }: Props) => {
     };
 
     loadWorkflow();
-  }, [poId]);
+  }, [poId, storeId]);
 
   const handleOpenGRNStep = () => {
     if (!poId) return;

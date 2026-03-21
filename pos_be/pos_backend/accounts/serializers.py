@@ -54,6 +54,10 @@ class RegistrationWithStoreSerializer(serializers.Serializer):
         # Default store contact email to owner email when not provided.
         if not store_data.get('email'):
             store_data['email'] = attrs.get('email')
+        if store_data.get('recovery_email'):
+            store_data['recovery_email'] = str(store_data['recovery_email']).strip().lower()
+        if not store_data.get('recovery_email'):
+            raise serializers.ValidationError({'store': {'recovery_email': ['Recovery email is required.']}})
 
         # Keep only one main store globally; auto-demote on conflict.
         if Store.objects.filter(is_main=True).exists():
@@ -162,6 +166,28 @@ class ChangePasswordSerializer(serializers.Serializer):
         if len(value) < 8:
             raise serializers.ValidationError("Password must be at least 8 characters long.")
         return value
+
+
+class ForgotPasswordOTPRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+
+class ForgotPasswordOTPConfirmSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    otp = serializers.CharField(required=True, min_length=6, max_length=6)
+    new_password = serializers.CharField(required=True, min_length=8)
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+    def validate_otp(self, value):
+        otp = value.strip()
+        if not otp.isdigit():
+            raise serializers.ValidationError("OTP must be a 6-digit number.")
+        return otp
 
 
 class LogoutSerializer(serializers.Serializer):

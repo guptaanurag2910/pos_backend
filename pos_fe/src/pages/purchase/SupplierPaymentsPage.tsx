@@ -17,12 +17,14 @@ import DeleteConfirmModal from '../../components/common/DeleteConfirmModal';
 import {
   createSupplierPayment,
   deleteSupplierPayment,
+  listPurchaseOrders,
   listSupplierInvoices,
   listSupplierPayments,
   listSuppliers,
   partialUpdateSupplierPayment,
   updateSupplierPayment,
 } from '../../service/purchaseService';
+import { useAuthStore } from '../../stores/authStore';
 
 const toNumber = (value: unknown) => {
   const n = Number(value);
@@ -93,6 +95,8 @@ const SupplierPaymentsPage = () => {
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [openInvoices, setOpenInvoices] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const user = useAuthStore((state) => state.user);
+  const storeId = Number(user?.storeId || 0) || undefined;
   const mode = String(searchParams.get('mode') || '').toLowerCase();
   const queryPoId = Number(searchParams.get('po'));
   const queryInvoiceId = Number(searchParams.get('invoice'));
@@ -101,16 +105,51 @@ const SupplierPaymentsPage = () => {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [paymentsResponse, suppliersResponse, invoicesResponse] = await Promise.all([
-        listSupplierPayments({ page_size: 500 }),
+      const scopeParams = {
+        page_size: 500,
+        ...(storeId ? { store: storeId } : {}),
+      };
+
+      const [paymentsResponse, suppliersResponse, invoicesResponse, purchaseOrdersResponse] = await Promise.all([
+        listSupplierPayments(scopeParams),
         listSuppliers(),
-        listSupplierInvoices({ page_size: 500 }),
+        listSupplierInvoices(scopeParams),
+        listPurchaseOrders(scopeParams),
       ]);
 
-      setPayments(extractList(paymentsResponse).map(normalizePayment));
-      setSuppliers(Array.isArray(suppliersResponse) ? suppliersResponse : []);
+      const rawInvoices = extractList(invoicesResponse);
+      const scopedInvoiceRows = storeId
+        ? rawInvoices.filter((invoice: any) => Number(invoice.store) === storeId)
+        : rawInvoices;
+      const invoices = scopedInvoiceRows.map(normalizeInvoice);
+      const allowedInvoiceIds = new Set(
+        scopedInvoiceRows
+          .map((invoice: any) => Number(invoice.id))
+          .filter((id: number) => Number.isFinite(id) && id > 0)
+      );
 
-      const invoices = extractList(invoicesResponse).map(normalizeInvoice);
+      const rawPurchaseOrders = extractList(purchaseOrdersResponse);
+      const scopedPoRows = storeId
+        ? rawPurchaseOrders.filter((po: any) => Number(po.store) === storeId)
+        : rawPurchaseOrders;
+      const allowedPoIds = new Set(
+        scopedPoRows
+          .map((po: any) => Number(po.id))
+          .filter((id: number) => Number.isFinite(id) && id > 0)
+      );
+
+      const scopedPayments = extractList(paymentsResponse).filter((payment: any) => {
+        const supplierInvoiceId = Number(payment.supplier_invoice || 0);
+        const purchaseOrderId = Number(payment.purchase_order || 0);
+
+        if (supplierInvoiceId > 0) return allowedInvoiceIds.has(supplierInvoiceId);
+        if (purchaseOrderId > 0) return allowedPoIds.has(purchaseOrderId);
+        if (!storeId) return true;
+        return Number(payment.created_by || 0) === Number(user?.id || 0);
+      });
+
+      setPayments(scopedPayments.map(normalizePayment));
+      setSuppliers(Array.isArray(suppliersResponse) ? suppliersResponse : []);
       setOpenInvoices(
         invoices.filter((invoice) => invoice.balanceAmount > 0 && invoice.status !== 'paid')
       );
@@ -124,7 +163,7 @@ const SupplierPaymentsPage = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [storeId, user?.id]);
 
   useEffect(() => {
     const editId = Number(searchParams.get('edit'));

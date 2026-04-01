@@ -7,9 +7,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-pos}
       POSTGRES_USER: ${POSTGRES_USER:-pos_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pos_password}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,15 +20,11 @@ services:
       - pos_net
 
   backend:
-    build:
-      context: ./pos_be/pos_backend
-      dockerfile: Dockerfile
-    image: ${BACKEND_IMAGE:-pos-backend:latest}
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
     restart: unless-stopped
     init: true
     environment:
-      # Core Django runtime settings.
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change-me-in-production}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY is required}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-False}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
       CORS_ALLOW_ALL_ORIGINS: ${CORS_ALLOW_ALL_ORIGINS:-False}
@@ -39,8 +33,6 @@ services:
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-True}
       CSRF_COOKIE_SECURE: ${CSRF_COOKIE_SECURE:-True}
       ENABLE_FILE_LOGGING: ${ENABLE_FILE_LOGGING:-False}
-
-      # Startup/runtime tuning.
       DB_WAIT_ENABLED: ${DB_WAIT_ENABLED:-true}
       DB_WAIT_TIMEOUT: ${DB_WAIT_TIMEOUT:-90}
       DB_WAIT_INTERVAL: ${DB_WAIT_INTERVAL:-3}
@@ -53,18 +45,13 @@ services:
       DJANGO_SUPERUSER_EMAIL: ${DJANGO_SUPERUSER_EMAIL:-}
       DJANGO_SUPERUSER_NAME: ${DJANGO_SUPERUSER_NAME:-}
       DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-}
-
-      # DB_* are used when DATABASE_URL is not provided.
       DB_ENGINE: ${DB_ENGINE:-django.db.backends.postgresql}
       DB_NAME: ${DB_NAME:-pos}
       DB_USER: ${DB_USER:-pos_user}
-      DB_PASSWORD: ${DB_PASSWORD:-pos_password}
-      # Default: dockerized postgres service. Override in .env for hosted DB.
+      DB_PASSWORD: ${DB_PASSWORD:-}
       DB_HOST: ${DB_HOST:-db}
       DB_PORT: ${DB_PORT:-5432}
       DB_SSLMODE: ${DB_SSLMODE:-prefer}
-      # Optional hosted DB (takes priority over DB_*):
-      # postgresql://user:pass@host:5432/dbname?sslmode=require
       DATABASE_URL: ${DATABASE_URL:-}
     ports:
       - "8000:8000"
@@ -81,13 +68,7 @@ services:
       - pos_net
 
   frontend:
-    build:
-      context: ./pos_fe
-      dockerfile: Dockerfile
-      args:
-        # Keep "/" so frontend uses nginx reverse proxy to backend.
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/}
-    image: ${FRONTEND_IMAGE:-pos-frontend:latest}
+    image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}
     restart: unless-stopped
     init: true
     ports:
@@ -102,7 +83,6 @@ services:
       - pos_net
 
 volumes:
-  # Named volumes persist data across container restarts.
   postgres_data:
   backend_media:
   backend_static:

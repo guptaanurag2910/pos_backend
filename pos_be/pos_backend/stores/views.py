@@ -30,6 +30,17 @@ def _require_global_admin(user):
         raise PermissionDenied("Only global admins can perform this action.")
 
 
+def _can_bootstrap_store(user, store):
+    if _is_global_admin(user):
+        return True
+    # Allow store-bound admins to bootstrap only their assigned store.
+    return bool(
+        getattr(user, 'role', None) == 'admin'
+        and getattr(user, 'store_id', None)
+        and str(getattr(user, 'store_id', '')) == str(getattr(store, 'id', ''))
+    )
+
+
 class StoreViewSet(viewsets.ModelViewSet):
     queryset = Store.objects.all()
     serializer_class = StoreSerializer
@@ -151,8 +162,9 @@ class StoreViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='bootstrap-import')
     def bootstrap_import(self, request, pk=None):
-        _require_global_admin(request.user)
         store = self.get_object()
+        if not _can_bootstrap_store(request.user, store):
+            raise PermissionDenied("Only global admins or the store owner can perform this action.")
         logger.info(
             f"Store bootstrap import started store_id={store.id} store_code={store.code} user_id={request.user.id}"
         )

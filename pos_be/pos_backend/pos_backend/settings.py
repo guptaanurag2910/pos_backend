@@ -43,6 +43,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -155,8 +156,9 @@ USE_I18N = True
 USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'static')
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # Media files
 MEDIA_URL = '/media/'
@@ -227,6 +229,26 @@ SPECTACULAR_SETTINGS = {
     'VERSION': '1.0.0',
 }
 
+ENABLE_FILE_LOGGING = os.getenv(
+    'ENABLE_FILE_LOGGING',
+    'False'
+).lower() in ('1', 'true', 'yes', 'on')
+
+APP_LOG_HANDLERS = ['console', 'file'] if ENABLE_FILE_LOGGING else ['console']
+LOG_HANDLERS = {
+    'console': {
+        'class': 'logging.StreamHandler',
+        'formatter': 'standard',
+    },
+}
+
+if ENABLE_FILE_LOGGING:
+    LOG_HANDLERS['file'] = {
+        'class': 'logging.FileHandler',
+        'filename': BASE_DIR / 'pos_backend.log',
+        'formatter': 'standard',
+    }
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -235,60 +257,50 @@ LOGGING = {
             'format': '[%(asctime)s] %(levelname)s %(name)s %(message)s',
         },
     },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'formatter': 'standard',
-        },
-        'file': {
-            'class': 'logging.FileHandler',
-            'filename': BASE_DIR / 'pos_backend.log',
-            'formatter': 'standard',
-        },
-    },
+    'handlers': LOG_HANDLERS,
     'loggers': {
         'pos.trace': {
-            'handlers': ['console', 'file'],
+            'handlers': APP_LOG_HANDLERS,
             'level': 'INFO',
             'propagate': False,
         },
         'stores': {
-            'handlers': ['console', 'file'],
+            'handlers': APP_LOG_HANDLERS,
             'level': 'INFO',
             'propagate': False,
         },
         'sales': {
-            'handlers': ['console', 'file'],
+            'handlers': APP_LOG_HANDLERS,
             'level': 'INFO',
             'propagate': False,
         },
         'reports': {
-            'handlers': ['console', 'file'],
+            'handlers': APP_LOG_HANDLERS,
             'level': 'INFO',
             'propagate': False,
         },
         'accounts': {
-            'handlers': ['console', 'file'],
+            'handlers': APP_LOG_HANDLERS,
             'level': 'INFO',
             'propagate': False,
         },
         'inventory': {
-            'handlers': ['console', 'file'],
+            'handlers': APP_LOG_HANDLERS,
             'level': 'INFO',
             'propagate': False,
         },
         'customers': {
-            'handlers': ['console', 'file'],
+            'handlers': APP_LOG_HANDLERS,
             'level': 'INFO',
             'propagate': False,
         },
         'suppliers': {
-            'handlers': ['console', 'file'],
+            'handlers': APP_LOG_HANDLERS,
             'level': 'INFO',
             'propagate': False,
         },
         'return': {
-            'handlers': ['console', 'file'],
+            'handlers': APP_LOG_HANDLERS,
             'level': 'INFO',
             'propagate': False,
         },

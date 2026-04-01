@@ -68,14 +68,25 @@ const InitialDataUploadPage = () => {
             Download Designed Template
           </a>
           <a
-            href="/bootstrap/store_bootstrap_sample.xlsx"
-            download
+            href="/bootstrap/store_sample_data.xlsx"
+            download="store_sample_data.xlsx"
             className="inline-flex items-center px-3 py-2 text-sm border border-gray-300 text-gray-700 dark:text-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
           >
             <FileSpreadsheet size={16} className="mr-2" />
-            Download Sample File
+            Download Small Sample
+          </a>
+          <a
+            href="/bootstrap/store_real_demo_data.xlsx"
+            download="store_real_demo_data.xlsx"
+            className="inline-flex items-center px-3 py-2 text-sm border border-emerald-300 text-emerald-700 dark:text-emerald-300 dark:border-emerald-600 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/30"
+          >
+            <FileSpreadsheet size={16} className="mr-2" />
+            Download Real Store Demo
           </a>
         </div>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Use Small Sample for a quick test run. Use Real Store Demo to preview realistic dashboard, sales, and inventory behavior.
+        </p>
 
         <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
           <UploadCloud size={16} />

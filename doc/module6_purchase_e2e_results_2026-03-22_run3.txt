@@ -1,0 +1,10 @@
+PASS|M6-SETUP-01|Admin A login
+PASS|M6-SETUP-02|Admin B login
+PASS|M6-SETUP-03|Manager A login
+PASS|M6-SETUP-04|Cashier A login
+PASS|M6-SETUP-05|Create category for purchase tests
+PASS|M6-SETUP-06|Create store A product
+FAIL|M6-SETUP-07|Create store B product failed status=400
+PASS|M6-SETUP-08|Create supplier A
+PASS|M6-SETUP-09|Create supplier B
+TOTAL=9 PASS=8 FAIL=1 TMP_DIR=/var/folders/mr/hb9y1fjn09xdk30yc6gv9jj40000gn/T/tmp.hjYBb6Xlho

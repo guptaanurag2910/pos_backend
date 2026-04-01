@@ -270,6 +270,7 @@ export const usePOSStore = create<POSStore>((set, get) => ({
         newItems[existingItemIndex] = {
           ...existingItem,
           quantity: newQuantity,
+          availableStock,
           discountType: computed.discountType,
           discountValue: computed.discountValue,
           discountRate: computed.discountRate,
@@ -305,6 +306,7 @@ export const usePOSStore = create<POSStore>((set, get) => ({
           discount: computed.discountAmount,
           discountRate: computed.discountRate,
           total: computed.total,
+          ...( { availableStock } as any ),
         } as BillItem;
         newItems = [...state.currentBill.items, newItem];
       }
@@ -316,6 +318,12 @@ export const usePOSStore = create<POSStore>((set, get) => ({
 
       return {
         ...state,
+        // Upsert live-searched product so later qty edits can resolve stock cap reliably.
+        products: state.products.some((p) => p.id === product.id)
+          ? state.products.map((p) =>
+              p.id === product.id ? { ...p, ...product, stock: availableStock } : p
+            )
+          : [...state.products, { ...product, stock: availableStock }],
         currentBill: {
           ...state.currentBill,
           items: newItems,
@@ -357,8 +365,18 @@ export const usePOSStore = create<POSStore>((set, get) => ({
 
       const item = newItems[itemIndex];
       const product = state.products.find((p) => p.id === item.productId);
-      const availableStock = toNumber(product?.stock, item.quantity);
-      const safeQuantity = Math.max(1, Math.min(quantity, availableStock));
+      const catalogStock = toNumber(product?.stock, NaN);
+      const itemStock = toNumber((item as any).availableStock, NaN);
+      const resolvedStock = Number.isFinite(catalogStock)
+        ? catalogStock
+        : Number.isFinite(itemStock)
+          ? itemStock
+          : Number.POSITIVE_INFINITY;
+      // Never auto-reduce an existing line below current qty due to stale/unknown stock metadata.
+      const quantityCap = Number.isFinite(resolvedStock)
+        ? Math.max(toNumber(item.quantity, 1), resolvedStock)
+        : Number.POSITIVE_INFINITY;
+      const safeQuantity = Math.max(1, Math.min(quantity, quantityCap));
       const computed = computeItemTotals({
         ...item,
         quantity: safeQuantity,
@@ -366,6 +384,7 @@ export const usePOSStore = create<POSStore>((set, get) => ({
       newItems[itemIndex] = {
         ...item,
         quantity: safeQuantity,
+        ...(Number.isFinite(resolvedStock) ? ({ availableStock: resolvedStock } as any) : {}),
         discountType: computed.discountType,
         discountValue: computed.discountValue,
         discountRate: computed.discountRate,

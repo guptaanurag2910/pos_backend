@@ -31,6 +31,72 @@ from stores.models import Store
 
 logger = logging.getLogger('inventory')
 
+def _normalize_batch_number(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+def _get_scoped_store_id(request):
+    user_store_id = getattr(request.user, 'store_id', None)
+    if user_store_id:
+        return user_store_id
+    return request.query_params.get('store')
+
+def _resolve_store_for_request(request, explicit_store_id=None):
+    user_store_id = getattr(request.user, 'store_id', None)
+    requested_store_id = explicit_store_id
+    if requested_store_id in ['', None]:
+        requested_store_id = None
+
+    if user_store_id:
+        if requested_store_id and str(requested_store_id) != str(user_store_id):
+            raise ValidationError({"store": "You can only access your assigned store"})
+        store = Store.objects.filter(id=user_store_id, is_active=True).first()
+        if not store:
+            raise ValidationError({"store": "Assigned store is invalid or inactive"})
+        return store
+
+    if requested_store_id:
+        store = Store.objects.filter(id=requested_store_id, is_active=True).first()
+        if not store:
+            raise ValidationError({"store": "Invalid or inactive store"})
+        return store
+
+    fallback = Store.objects.filter(is_main=True, is_active=True).first()
+    if fallback:
+        return fallback
+    return Store.objects.filter(is_active=True).order_by('id').first()
+
+def _get_or_create_stock_level_safe(product, store, batch_number=None, defaults=None, lock_for_update=False):
+    normalized_batch = _normalize_batch_number(batch_number)
+    defaults = defaults or {}
+    qs = StockLevel.objects
+    if lock_for_update:
+        qs = qs.select_for_update()
+    qs = qs.filter(product=product, store=store)
+
+    if normalized_batch is None:
+        stock_level = qs.filter(
+            models.Q(batch_number__isnull=True) | models.Q(batch_number='')
+        ).order_by('-updated_at', '-id').first()
+    else:
+        stock_level = qs.filter(batch_number=normalized_batch).order_by('-updated_at', '-id').first()
+
+    if stock_level:
+        return stock_level, False
+
+    create_kwargs = {
+        'product': product,
+        'store': store,
+        'batch_number': normalized_batch,
+    }
+    create_kwargs.update(defaults)
+    return StockLevel.objects.create(**create_kwargs), True
+
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
@@ -92,23 +158,17 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = Product.objects.all()
-        user = self.request.user
-
-        store_id = None
-        if user.role == 'admin':
-            # Store-admin users should default to their own store.
-            # Global admin (no store) can still view all stores unless `store` is provided.
-            store_id = self.request.query_params.get('store') or getattr(user, 'store_id', None)
-        else:
-            store_id = getattr(user, 'store_id', None)
+        store_id = _get_scoped_store_id(self.request)
 
         if store_id:
-            queryset = queryset.annotate(
+            # Enforce store-level visibility for list and detail routes.
+            # Without this filter, scoped users could fetch products from other stores by ID.
+            queryset = queryset.filter(stock_levels__store_id=store_id).annotate(
                 current_stock=Sum(
                     'stock_levels__quantity',
                     filter=models.Q(stock_levels__store_id=store_id)
                 )
-            )
+            ).distinct()
         else:
             queryset = queryset.annotate(current_stock=Sum('stock_levels__quantity'))
 
@@ -140,20 +200,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             raise ValidationError({field_name: f"{field_name} must be a valid number"})
 
     def _resolve_store_for_stock(self, explicit_store_id=None):
-        if explicit_store_id:
-            store = Store.objects.filter(id=explicit_store_id, is_active=True).first()
-            if not store:
-                raise ValidationError({"store": "Invalid or inactive store"})
-            return store
-
-        user_store = getattr(self.request.user, 'store', None)
-        if user_store:
-            return user_store
-
-        fallback = Store.objects.filter(is_main=True, is_active=True).first()
-        if fallback:
-            return fallback
-        return Store.objects.filter(is_active=True).order_by('id').first()
+        return _resolve_store_for_request(self.request, explicit_store_id)
 
     def _resolve_store_for_inventory_io(self, explicit_store_id=None):
         store = self._resolve_store_for_stock(explicit_store_id)
@@ -317,6 +364,9 @@ class ProductViewSet(viewsets.ModelViewSet):
     def stock_levels(self, request, pk=None):
         product = self.get_object()
         stock_levels = StockLevel.objects.filter(product=product)
+        scoped_store_id = _get_scoped_store_id(request)
+        if scoped_store_id:
+            stock_levels = stock_levels.filter(store_id=scoped_store_id)
         serializer = StockLevelSerializer(stock_levels, many=True)
         return Response(serializer.data)
     
@@ -324,6 +374,9 @@ class ProductViewSet(viewsets.ModelViewSet):
     def stock_history(self, request, pk=None):
         product = self.get_object()
         stock_records = StockRecord.objects.filter(product=product)
+        scoped_store_id = _get_scoped_store_id(request)
+        if scoped_store_id:
+            stock_records = stock_records.filter(store_id=scoped_store_id)
         serializer = StockRecordSerializer(stock_records, many=True)
         return Response(serializer.data)
     
@@ -335,6 +388,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         # Validate input
         store_id = request.data.get('store')
         quantity = request.data.get('quantity')
+        batch_number = _normalize_batch_number(request.data.get('batch_number'))
         reason = request.data.get('reason', 'Manual adjustment')
         
         if not store_id or quantity is None:
@@ -352,11 +406,14 @@ class ProductViewSet(viewsets.ModelViewSet):
             )
         
         with transaction.atomic():
+            store = self._resolve_store_for_stock(store_id)
             # Update stock level
-            stock_level, created = StockLevel.objects.get_or_create(
+            stock_level, _ = _get_or_create_stock_level_safe(
                 product=product,
-                store_id=store_id,
-                defaults={'quantity': 0}
+                store=store,
+                batch_number=batch_number,
+                defaults={'quantity': 0},
+                lock_for_update=True,
             )
 
             projected_quantity = Decimal(str(stock_level.quantity)) + quantity
@@ -369,9 +426,10 @@ class ProductViewSet(viewsets.ModelViewSet):
             # Create stock record
             record = StockRecord.objects.create(
                 product=product,
-                store_id=store_id,
+                store=store,
                 quantity=quantity,
                 record_type='adjustment',
+                batch_number=stock_level.batch_number,
                 notes=reason,
                 created_by=request.user
             )
@@ -592,11 +650,12 @@ class ProductViewSet(viewsets.ModelViewSet):
                         product.save()
                         updated_products += 1
 
-                    stock_level, created = StockLevel.objects.get_or_create(
+                    stock_level, created = _get_or_create_stock_level_safe(
                         product=product,
                         store=store,
                         batch_number=batch_number,
-                        defaults={'quantity': 0, 'min_stock': 0, 'max_stock': max_stock, 'expiry_date': expiry_date}
+                        defaults={'quantity': 0, 'min_stock': 0, 'max_stock': max_stock, 'expiry_date': expiry_date},
+                        lock_for_update=True,
                     )
                     old_qty = Decimal(str(stock_level.quantity))
                     stock_level.quantity = quantity
@@ -724,6 +783,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 quantity = Decimal(str(quantity_raw))
                 if not store_id:
                     raise ValueError("store is required")
+                store = self._resolve_store_for_stock(store_id)
 
                 product = None
                 if product_id:
@@ -734,11 +794,12 @@ class ProductViewSet(viewsets.ModelViewSet):
                     raise ValueError("product not found")
 
                 with transaction.atomic():
-                    stock_level, _ = StockLevel.objects.get_or_create(
+                    stock_level, _ = _get_or_create_stock_level_safe(
                         product=product,
-                        store_id=store_id,
+                        store=store,
                         batch_number=batch_number,
-                        defaults={'quantity': 0, 'expiry_date': expiry_date}
+                        defaults={'quantity': 0, 'expiry_date': expiry_date},
+                        lock_for_update=True,
                     )
 
                     projected = Decimal(str(stock_level.quantity)) + quantity
@@ -752,7 +813,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
                     record = StockRecord.objects.create(
                         product=product,
-                        store_id=store_id,
+                        store=store,
                         quantity=quantity,
                         record_type='adjustment',
                         notes=item_reason,
@@ -764,7 +825,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 results.append({
                     'index': idx,
                     'product_id': product.id,
-                    'store_id': int(store_id),
+                    'store_id': int(store.id),
                     'quantity': str(quantity),
                     'stock_record_id': record.id,
                     'new_stock_level': str(stock_level.quantity)
@@ -834,9 +895,13 @@ class StockRecordViewSet(viewsets.ReadOnlyModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
+        queryset = StockRecord.objects.all()
+        scoped_store_id = _get_scoped_store_id(self.request)
+        if scoped_store_id:
+            return queryset.filter(store_id=scoped_store_id)
         if user.role == 'admin':
-            return StockRecord.objects.all()
-        return StockRecord.objects.filter(store=user.store)
+            return queryset
+        return queryset.none()
 
 class StockLevelViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = StockLevelSerializer
@@ -853,10 +918,13 @@ class StockLevelViewSet(viewsets.ReadOnlyModelViewSet):
         return [permission() for permission in permission_classes]
     
     def get_queryset(self):
-        user = self.request.user
-        if user.role == 'admin':
-            return StockLevel.objects.all()
-        return StockLevel.objects.filter(store=user.store)
+        scoped_store_id = _get_scoped_store_id(self.request)
+        queryset = StockLevel.objects.all()
+        if scoped_store_id:
+            return queryset.filter(store_id=scoped_store_id)
+        if self.request.user.role == 'admin':
+            return queryset
+        return queryset.none()
     
     @action(detail=False, methods=['get'])
     def low_stock(self, request):
@@ -877,6 +945,11 @@ class StockLevelViewSet(viewsets.ReadOnlyModelViewSet):
         if not isinstance(items, list) or not items:
             return Response({"detail": "items must be a non-empty list"}, status=status.HTTP_400_BAD_REQUEST)
 
+        try:
+            store = _resolve_store_for_request(request, store_id)
+        except ValidationError as e:
+            return Response(e.detail, status=status.HTTP_400_BAD_REQUEST)
+
         reconciled = []
         errors = []
 
@@ -890,51 +963,55 @@ class StockLevelViewSet(viewsets.ReadOnlyModelViewSet):
                     raise ValueError("product is required")
                 if expected_qty_raw is None:
                     raise ValueError("expected_quantity is required")
+                product = Product.objects.filter(id=product_id).first()
+                if not product:
+                    raise ValueError("product not found")
 
                 expected_qty = Decimal(str(expected_qty_raw))
                 if expected_qty < 0:
                     raise ValueError("expected_quantity cannot be negative")
 
-                stock_level, _ = StockLevel.objects.get_or_create(
-                    product_id=product_id,
-                    store_id=store_id,
-                    batch_number=batch_number,
-                    defaults={'quantity': 0}
-                )
-                current_qty = Decimal(str(stock_level.quantity))
-                difference = expected_qty - current_qty
+                with transaction.atomic():
+                    stock_level, _ = _get_or_create_stock_level_safe(
+                        product=product,
+                        store=store,
+                        batch_number=batch_number,
+                        defaults={'quantity': 0},
+                        lock_for_update=apply_changes,
+                    )
+                    current_qty = Decimal(str(stock_level.quantity))
+                    difference = expected_qty - current_qty
 
-                entry = {
-                    'index': idx,
-                    'product_id': int(product_id),
-                    'batch_number': batch_number,
-                    'current_quantity': str(current_qty),
-                    'expected_quantity': str(expected_qty),
-                    'difference': str(difference),
-                    'applied': False,
-                }
+                    entry = {
+                        'index': idx,
+                        'product_id': int(product.id),
+                        'batch_number': batch_number,
+                        'current_quantity': str(current_qty),
+                        'expected_quantity': str(expected_qty),
+                        'difference': str(difference),
+                        'applied': False,
+                    }
 
-                if apply_changes and difference != 0:
-                    with transaction.atomic():
+                    if apply_changes and difference != 0:
                         stock_level.quantity = expected_qty
                         stock_level.save(update_fields=['quantity', 'updated_at'])
                         StockRecord.objects.create(
-                            product_id=product_id,
-                            store_id=store_id,
+                            product=product,
+                            store=store,
                             quantity=difference,
                             record_type='adjustment',
                             notes=reason,
                             batch_number=batch_number,
                             created_by=request.user
                         )
-                    entry['applied'] = True
+                        entry['applied'] = True
 
                 reconciled.append(entry)
             except (InvalidOperation, ValueError) as e:
                 errors.append({'index': idx, 'error': str(e), 'payload': item})
 
         return Response({
-            'store_id': int(store_id),
+            'store_id': int(store.id),
             'apply': apply_changes,
             'processed': len(reconciled),
             'failed': len(errors),
@@ -952,11 +1029,14 @@ class StockTransferViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
+        user_store_id = getattr(user, 'store_id', None)
+        if user_store_id:
+            return StockTransfer.objects.filter(
+                models.Q(from_store_id=user_store_id) | models.Q(to_store_id=user_store_id)
+            )
         if user.role == 'admin':
             return StockTransfer.objects.all()
-        return StockTransfer.objects.filter(
-            models.Q(from_store=user.store) | models.Q(to_store=user.store)
-        )
+        return StockTransfer.objects.none()
 
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
@@ -1055,10 +1135,11 @@ class StockTransferViewSet(viewsets.ModelViewSet):
                 
                 for item in transfer.items.all():
                     # Reduce stock from sending store
-                    from_stock, _ = StockLevel.objects.get_or_create(
+                    from_stock, _ = _get_or_create_stock_level_safe(
                         product=item.product,
                         store=transfer.from_store,
-                        defaults={'quantity': 0}
+                        defaults={'quantity': 0},
+                        lock_for_update=True,
                     )
                     if from_stock.quantity < item.quantity:
                         raise ValidationError(
@@ -1068,11 +1149,12 @@ class StockTransferViewSet(viewsets.ModelViewSet):
                     from_stock.save()
                     
                     # Add stock to receiving store
-                    to_stock, _ = StockLevel.objects.get_or_create(
+                    to_stock, _ = _get_or_create_stock_level_safe(
                         product=item.product,
                         store=transfer.to_store,
                         batch_number=item.batch_number,
-                        defaults={'quantity': 0}
+                        defaults={'quantity': 0},
+                        lock_for_update=True,
                     )
                     to_stock.quantity += item.quantity
                     if item.expiry_date:
@@ -1220,6 +1302,7 @@ class InventoryUploadViewSet(viewsets.ModelViewSet):
                     raise ValueError('store_id is required')
                 if not quantity_raw:
                     raise ValueError('quantity is required')
+                store = _resolve_store_for_request(request, store_id)
 
                 quantity = Decimal(quantity_raw)
                 if mode == 'set' and quantity < 0:
@@ -1234,11 +1317,12 @@ class InventoryUploadViewSet(viewsets.ModelViewSet):
                     raise ValueError('product not found')
 
                 with transaction.atomic():
-                    stock_level, _ = StockLevel.objects.get_or_create(
+                    stock_level, _ = _get_or_create_stock_level_safe(
                         product=product,
-                        store_id=store_id,
+                        store=store,
                         batch_number=batch_number,
-                        defaults={'quantity': 0, 'expiry_date': expiry_date}
+                        defaults={'quantity': 0, 'expiry_date': expiry_date},
+                        lock_for_update=True,
                     )
 
                     current_qty = Decimal(str(stock_level.quantity))
@@ -1259,7 +1343,7 @@ class InventoryUploadViewSet(viewsets.ModelViewSet):
                     if delta != 0:
                         StockRecord.objects.create(
                             product=product,
-                            store_id=store_id,
+                            store=store,
                             quantity=delta,
                             record_type='adjustment',
                             reference_id=f'UPLOAD-{upload.id}',
@@ -1273,7 +1357,7 @@ class InventoryUploadViewSet(viewsets.ModelViewSet):
                 applied.append({
                     'line': idx,
                     'product_id': product.id,
-                    'store_id': int(store_id),
+                    'store_id': int(store.id),
                     'new_quantity': str(final_qty),
                     'delta': str(delta)
                 })

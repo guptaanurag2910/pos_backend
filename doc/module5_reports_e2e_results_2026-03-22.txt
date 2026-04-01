@@ -1,0 +1,42 @@
+PASS|M5-SETUP-01|Admin A login
+PASS|M5-SETUP-02|Admin B login
+PASS|M5-SETUP-03|Manager A login
+PASS|M5-SETUP-04|Cashier A login
+PASS|M5-SETUP-05|Create category for reports seed
+PASS|M5-SETUP-06|Create store A report seed product
+PASS|M5-SETUP-07|Create store B report seed product
+PASS|M5-SETUP-08|Create store A seed bill
+PASS|M5-SETUP-09|Create store B seed bill
+PASS|M5-SETUP-10|Complete store A seed bill
+PASS|M5-SETUP-11|Complete store B seed bill
+PASS|M5-001|Dashboard endpoint returns expected sections
+PASS|M5-002|Dashboard analytics alias works
+PASS|M5-003|Dashboard invalid date rejected
+PASS|M5-004|Dashboard start_date after end_date rejected
+PASS|M5-005|Dashboard all_time works
+PASS|M5-006|Manager dashboard is store-scoped
+PASS|M5-007|Store-bound admin cannot override report scope with store param
+PASS|M5-008|Admin B dashboard sees own store bill
+PASS|M5-009|Sales report day grouping works
+PASS|M5-010|Sales report week grouping works
+PASS|M5-011|Sales report month grouping works
+PASS|M5-012|Sales report invalid group rejected
+PASS|M5-013|Sales report invalid date rejected
+PASS|M5-014|Sales report CSV export works
+PASS|M5-015|Inventory report returns summary and rows
+PASS|M5-016|Inventory low_stock filter works
+PASS|M5-017|Inventory invalid date range rejected
+PASS|M5-018|Inventory CSV export works
+PASS|M5-019|Customer report returns expected sections
+PASS|M5-020|Customer report invalid date rejected
+PASS|M5-021|Customer CSV export works
+PASS|M5-022|Tax report returns expected sections
+PASS|M5-023|Tax report invalid date range rejected
+PASS|M5-024|Tax CSV export works
+PASS|M5-025|Bootstrap export returns xlsx for manager
+PASS|M5-026|Store-bound admin cannot override bootstrap export store
+PASS|M5-027|Admin B bootstrap export scoped to store B
+PASS|M5-028|Cashier can access dashboard reports
+PASS|M5-029|Cashier can access sales report
+PASS|M5-030|Dashboard analytics includes returns summary
+TOTAL=41 PASS=41 FAIL=0 TMP_DIR=/var/folders/mr/hb9y1fjn09xdk30yc6gv9jj40000gn/T/tmp.SkXLiZvEkw

@@ -78,8 +78,15 @@ class ReturnSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Bill is required.")
         if bill.status != 'completed':
             raise serializers.ValidationError("Return can only be created for completed bills.")
-        if user and user.role != 'admin' and bill.store_id != getattr(user, 'store_id', None):
-            raise serializers.ValidationError("You can only create returns for your store.")
+        if user:
+            user_store_id = getattr(user, 'store_id', None)
+            is_global_admin = bool(
+                getattr(user, 'is_superuser', False) or
+                (getattr(user, 'role', None) == 'admin' and not user_store_id)
+            )
+            if not is_global_admin:
+                if not user_store_id or bill.store_id != user_store_id:
+                    raise serializers.ValidationError("You can only create returns for your store.")
 
         total_item_refund = Decimal('0')
         for item in (items_data or []):

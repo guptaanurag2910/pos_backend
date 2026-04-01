@@ -35,7 +35,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     ordering = ['name']
     
     def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy', 'merge']:
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'merge', 'add_points']:
             permission_classes = [IsManagerUser]
         else:
             permission_classes = [IsAuthenticated]
@@ -306,7 +306,36 @@ class CustomerGroupViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['is_active']
     search_fields = ['name', 'description']
-    
+
+    def _scoped_customer_queryset(self):
+        user = self.request.user
+        queryset = Customer.objects.filter(is_active=True)
+        if _is_global_admin(user):
+            return queryset
+        user_store = getattr(user, 'store', None)
+        if not user_store:
+            return Customer.objects.none()
+        return queryset.filter(
+            Q(store_links__store=user_store) |
+            Q(bills__store=user_store)
+        ).distinct()
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = CustomerGroup.objects.all()
+        if _is_global_admin(user):
+            return queryset
+
+        user_store = getattr(user, 'store', None)
+        if not user_store:
+            return CustomerGroup.objects.none()
+
+        scoped_customers = self._scoped_customer_queryset()
+        return queryset.filter(
+            Q(created_by__store=user_store) |
+            Q(customers__in=scoped_customers)
+        ).distinct()
+
     @action(detail=True, methods=['post'])
     def add_customers(self, request, pk=None):
         group = self.get_object()
@@ -319,7 +348,7 @@ class CustomerGroupViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        customers = Customer.objects.filter(id__in=customer_ids)
+        customers = self._scoped_customer_queryset().filter(id__in=customer_ids)
         if not customers.exists():
             return Response(
                 {"detail": "No valid customers found"},
@@ -361,7 +390,7 @@ class CustomerGroupViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        customers = Customer.objects.filter(id__in=customer_ids)
+        customers = self._scoped_customer_queryset().filter(id__in=customer_ids)
         if not customers.exists():
             return Response(
                 {"detail": "No valid customers found"},

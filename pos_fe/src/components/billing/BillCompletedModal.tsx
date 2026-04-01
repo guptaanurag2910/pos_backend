@@ -100,6 +100,33 @@ const BillCompletedModal = ({ bill, onClose, onNewBill }: BillCompletedModalProp
     loadStoreProfile();
   }, [bill?.store, user?.storeId]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isEditableTarget =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        Boolean(target?.isContentEditable);
+
+      if (isEditableTarget) return;
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        onNewBill();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose, onNewBill]);
+
   const buildThermalPdf = async () => {
     const paperWidth = 76;
     const margin = 4;
@@ -686,6 +713,9 @@ const BillCompletedModal = ({ bill, onClose, onNewBill }: BillCompletedModalProp
         </div>
 
         <div className="px-6 pb-6">
+          <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+            <span className="font-medium">Keyboard Shortcuts:</span> Esc - Close, Enter - Start New Bill
+          </div>
           <button
             onClick={onNewBill}
             className="w-full py-2 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700"

@@ -1,0 +1,46 @@
+PASS|M7-SETUP-01|Admin A login
+PASS|M7-SETUP-02|Admin B login
+PASS|M7-SETUP-03|Manager A login
+PASS|M7-SETUP-04|Cashier A login
+PASS|M7-SETUP-05|Create category for customer/loyalty tests
+PASS|M7-SETUP-06|Create store A product for customer billing
+PASS|M7-SETUP-07|Create store B product for customer billing
+PASS|M7-SETUP-08|Create customer A (store A)
+PASS|M7-SETUP-09|Create duplicate candidate customer
+PASS|M7-SETUP-10|Create customer B (store B)
+PASS|M7-SETUP-11|Create bill A for customer loyalty baseline
+PASS|M7-SETUP-12|Complete bill A
+PASS|M7-SETUP-13|Customer A points increased after completed bill
+PASS|M7-001|Manager customer list scoped to store A
+PASS|M7-002|Admin B customer list scoped to store B
+PASS|M7-003|Manager cannot retrieve store B customer
+PASS|M7-004|Admin B cannot retrieve store A customer
+PASS|M7-005|Cashier denied customer create
+PASS|M7-006|Invalid phone validation works
+PASS|M7-007|Manager can add loyalty points
+PASS|M7-008|Zero points rejected
+PASS|M7-009|Over-deduction of points rejected
+PASS|M7-010|Cashier denied add_points
+PASS|M7-011|Customer purchase history returns bills
+PASS|M7-012|Manager cannot access store B purchase history
+PASS|M7-013|Customer soft delete works
+PASS|M7-014|Deleted customer visibility flags work
+PASS|M7-SETUP-14|Create second duplicate customer for merge
+PASS|M7-015|Merge invalid payload rejected
+PASS|M7-016|Merge primary in duplicates rejected
+PASS|M7-017|Customer merge success
+PASS|M7-018|Merged duplicate is inactive/non-visible
+PASS|M7-019|Manager stats endpoint works
+PASS|M7-020|Cashier can access customer stats
+PASS|M7-021|Create customer group
+PASS|M7-022|Add same-store customer to group
+PASS|M7-023|Remove same-store customer from group
+PASS|M7-024|Cross-store group add blocked
+PASS|M7-025|Cross-store group remove blocked
+PASS|M7-SETUP-15|Create group B for scope checks
+PASS|M7-026|Manager group list scoped
+PASS|M7-027|Admin B group list scoped
+PASS|M7-028|Draft bill captures points redemption
+PASS|M7-029|Cross-store customer merge blocked
+TOTAL=44 PASS=44 FAIL=0 TMP_DIR=/var/folders/mr/hb9y1fjn09xdk30yc6gv9jj40000gn/T/tmp.CK2J0qcwaS
+/var/folders/mr/hb9y1fjn09xdk30yc6gv9jj40000gn/T/tmp.CK2J0qcwaS

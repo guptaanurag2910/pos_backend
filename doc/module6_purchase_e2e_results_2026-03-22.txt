@@ -1,0 +1,58 @@
+PASS|M6-SETUP-01|Admin A login
+PASS|M6-SETUP-02|Admin B login
+PASS|M6-SETUP-03|Manager A login
+PASS|M6-SETUP-04|Cashier A login
+PASS|M6-SETUP-05|Create category for purchase tests
+PASS|M6-SETUP-06|Create store A product
+PASS|M6-SETUP-07|Create store B product
+PASS|M6-SETUP-08|Create supplier A
+PASS|M6-SETUP-09|Create supplier B
+PASS|M6-SETUP-10|Create PO A (store A)
+PASS|M6-SETUP-11|Create PO B (store B)
+PASS|M6-SETUP-12|Fetch PO item ids for nested tests
+PASS|M6-001|Manager PO list scoped to store A
+PASS|M6-002|Admin B PO list scoped to store B
+PASS|M6-003|Manager cannot retrieve store B PO
+PASS|M6-004|Admin B cannot retrieve store A PO
+PASS|M6-005|Cashier denied PO access
+PASS|M6-006|Manager cannot override PO store
+PASS|M6-007|PO status update to sent
+PASS|M6-008|PO invalid status rejected
+PASS|M6-009|Manager cannot access PO B nested items
+PASS|M6-010|Admin B cannot access PO A nested items
+PASS|M6-011|Create GRN A pending
+PASS|M6-012|Create GRN B pending
+PASS|M6-013|Complete GRN A
+PASS|M6-014|Complete GRN A again remains idempotent
+PASS|M6-015|GRN completion updated stock exactly once
+PASS|M6-016|Manager GRN list scoped to store A
+PASS|M6-017|Admin B GRN list scoped to store B
+PASS|M6-018|Manager cannot retrieve GRN B
+PASS|M6-019|Admin B cannot retrieve GRN A
+PASS|M6-020|Manager cannot access GRN B nested items
+PASS|M6-021|Cashier denied GRN access
+PASS|M6-022|Create supplier invoice A
+PASS|M6-023|Create supplier invoice B
+PASS|M6-024|Manager invoice list scoped to store A
+PASS|M6-025|Admin B invoice list scoped to store B
+PASS|M6-026|Manager cannot retrieve invoice B
+PASS|M6-027|Admin B cannot retrieve invoice A
+PASS|M6-028|Manager cannot access invoice B nested items
+PASS|M6-029|Cashier denied invoice access
+PASS|M6-030|Create partial payment for invoice A
+PASS|M6-031|Invoice A moved to partially_paid with correct paid amount
+PASS|M6-032|Overpayment on invoice rejected
+PASS|M6-033|Create remaining payment for invoice A
+PASS|M6-034|Invoice A fully paid with zero due
+PASS|M6-035|Create store B payment for scope tests
+PASS|M6-036|Manager cross-store payment create blocked
+PASS|M6-037|Manager payment list scoped to store A
+PASS|M6-038|Admin B payment list scoped to store B
+PASS|M6-039|Manager cannot retrieve payment B
+PASS|M6-040|Admin B cannot retrieve payment A
+PASS|M6-041|Cashier denied payment access
+PASS|M6-042|Soft-deleted payment hidden by default and visible with include_inactive
+PASS|M6-043|Supplier purchase history returns orders
+PASS|M6-044|Supplier payment history returns payments
+TOTAL=56 PASS=56 FAIL=0 TMP_DIR=/var/folders/mr/hb9y1fjn09xdk30yc6gv9jj40000gn/T/tmp.xP3W1X8vQp
+/var/folders/mr/hb9y1fjn09xdk30yc6gv9jj40000gn/T/tmp.xP3W1X8vQp

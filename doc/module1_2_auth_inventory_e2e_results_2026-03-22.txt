@@ -1,0 +1,20 @@
+PASS|M1-001|Admin A login works
+PASS|M1-002|Admin B login works
+PASS|M1-003|Manager login works
+PASS|M1-004|Cashier login works
+PASS|M1-005|Invalid login rejected
+PASS|M1-006|Manager store list scoped to own store
+PASS|M1-007|Manager cannot read other store
+PASS|M2-001|Create category
+PASS|M2-002|Create product with initial stock
+PASS|M2-003|Initial stock reflected in product detail
+PASS|M2-004|Patch product details overwrite works
+PASS|M2-005|View product shows latest updated data
+PASS|M2-006|Second qty patch accepted
+PASS|M2-007|Qty overwrite confirmed (latest stock=4, not additive)
+PASS|M2-008|Stock levels are consistent with latest product qty
+PASS|M2-009|Cashier cannot edit inventory product
+PASS|M2-010|Cross-store admin cannot read other-store product
+PASS|M2-011|Manager cannot create product in other store
+PASS|M2-012|Negative quantity rejected
+TOTAL=19 PASS=19 FAIL=0 TMP_DIR=/var/folders/mr/hb9y1fjn09xdk30yc6gv9jj40000gn/T/tmp.McufsXGYUB

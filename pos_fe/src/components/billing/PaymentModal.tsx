@@ -31,7 +31,9 @@ const PaymentModal = ({
   onClose,
   onComplete,
 }: PaymentModalProps) => {
+  const paymentMethods = ['cash', 'card', 'upi'] as const;
   const [paymentMethod, setPaymentMethod] = useState('');
+  const [highlightedMethodIndex, setHighlightedMethodIndex] = useState(0);
   const [cashReceived, setCashReceived] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -120,26 +122,58 @@ const PaymentModal = ({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isEditableTarget =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        Boolean(target?.isContentEditable);
+
       if (event.key === 'Escape') {
         event.preventDefault();
         onClose();
         return;
       }
 
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        if (!loading) void handleComplete();
+      // Do not hijack number/arrow typing when user is entering values in fields.
+      if (isEditableTarget) {
         return;
       }
 
-      if (event.key === '1') setPaymentMethod('cash');
-      if (event.key === '2') setPaymentMethod('card');
-      if (event.key === '3') setPaymentMethod('upi');
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        setHighlightedMethodIndex((current) => {
+          const next = (current + 1) % paymentMethods.length;
+          setPaymentMethod(paymentMethods[next]);
+          return next;
+        });
+        return;
+      }
+
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        setHighlightedMethodIndex((current) => {
+          const next = (current - 1 + paymentMethods.length) % paymentMethods.length;
+          setPaymentMethod(paymentMethods[next]);
+          return next;
+        });
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (!paymentMethod) {
+          setPaymentMethod(paymentMethods[highlightedMethodIndex]);
+          return;
+        }
+        if (!loading) void handleComplete();
+        return;
+      }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [loading, onClose, handleComplete]);
+  }, [handleComplete, highlightedMethodIndex, loading, onClose, paymentMethod, paymentMethods]);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -172,7 +206,7 @@ const PaymentModal = ({
           <div className="space-y-4 mb-6">
             <p className="font-medium text-gray-700">Select Payment Method</p>
             <div className="grid grid-cols-3 gap-3">
-              {['cash', 'card', 'upi'].map((method) => {
+              {paymentMethods.map((method, index) => {
                 const Icon = method === 'cash' ? IndianRupee : method === 'card' ? CreditCard : Smartphone;
                 const label = method.charAt(0).toUpperCase() + method.slice(1);
                 return (
@@ -183,9 +217,14 @@ const PaymentModal = ({
                     className={`flex flex-col items-center justify-center p-3 rounded-lg border transition-colors ${
                       paymentMethod === method
                         ? 'border-primary-500 bg-primary-50 text-primary-700'
-                        : 'border-gray-300 hover:border-primary-500 hover:bg-primary-50'
+                        : highlightedMethodIndex === index
+                          ? 'border-primary-300 bg-primary-50/60 text-primary-700'
+                          : 'border-gray-300 hover:border-primary-500 hover:bg-primary-50'
                     }`}
-                    onClick={() => setPaymentMethod(method)}
+                    onClick={() => {
+                      setHighlightedMethodIndex(index);
+                      setPaymentMethod(method);
+                    }}
                   >
                     <Icon size={24} className="mb-1" />
                     <span className="text-sm">{label}</span>
@@ -239,6 +278,10 @@ const PaymentModal = ({
             >
               {loading ? 'Processing...' : 'Complete Payment'}
             </button>
+          </div>
+
+          <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+            <span className="font-medium">Keyboard Shortcuts:</span> Esc - Close, Arrow Keys - Select Payment Method, Enter - Complete Payment
           </div>
         </div>
       </div>

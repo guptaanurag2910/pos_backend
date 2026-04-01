@@ -1,0 +1,46 @@
+PASS|M8-SETUP-01|Admin A login
+PASS|M8-SETUP-02|Admin B login
+PASS|M8-SETUP-03|Manager A login
+PASS|M8-SETUP-04|Cashier A login
+PASS|M8-001|Manager list scoped to store A
+PASS|M8-002|Cashier list scoped to own store
+FAIL|M8-003|Admin B scoping failed status=200 count=10
+PASS|M8-004|Manager cannot retrieve store B
+PASS|M8-005|Cashier cannot retrieve store B
+FAIL|M8-006|Admin B cross-store retrieve leak status=200
+PASS|M8-007|Manager active endpoint scoped
+FAIL|M8-008|Admin B active scope failed status=200 count=12
+PASS|M8-009|Manager can read store settings
+PASS|M8-010|Cashier can read own store settings
+FAIL|M8-011|Admin B cross-store settings read leak status=200
+FAIL|M8-012|Manager settings patch failed status=400 prefix=[
+  "Ensure this field has no more than 10 characters."
+]
+FAIL|M8-013|Cashier settings patch expected 403 got 400
+FAIL|M8-014|Admin B own settings patch failed status=400 prefix=[
+  "Ensure this field has no more than 10 characters."
+]
+FAIL|M8-015|Admin B cross-store settings patch leak status=400
+PASS|M8-016|Invalid settings payload rejected
+PASS|M8-017|Manager cannot patch store master details
+PASS|M8-018|Cashier cannot patch store master details
+FAIL|M8-019|Store-bound admin store patch expected 403 got 200
+PASS|M8-020|Manager cannot create store
+PASS|M8-021|Cashier cannot create store
+FAIL|M8-022|Store-bound admin create store expected 403 got 201
+FAIL|M8-023|Store-bound admin activate expected 403 got 200
+FAIL|M8-024|Store-bound admin deactivate expected 403 got 200
+FAIL|M8-025|Store-bound admin set_main expected 403 got 200
+PASS|M8-026|Manager cannot activate store
+PASS|M8-027|Manager cannot set main store
+PASS|M8-028|Manager denied bootstrap import
+FAIL|M8-029|Store-bound admin bootstrap-import expected 403 got 400
+PASS|M8-030|Cashier cannot patch cross-store settings
+PASS|M8-031|Cashier can read own store detail
+PASS|M8-032|Manager can read own store detail
+PASS|M8-033|Admin B can read own store settings
+FAIL|M8-034|Settings persistence failed status=200 prefix=M8X
+PASS|M8-035|Store list includes settings object
+FAIL|M8-036|Settings PUT expected 200 got 400
+TOTAL=40 PASS=24 FAIL=16 TMP_DIR=/var/folders/mr/hb9y1fjn09xdk30yc6gv9jj40000gn/T/tmp.FJasDKppFH
+/var/folders/mr/hb9y1fjn09xdk30yc6gv9jj40000gn/T/tmp.FJasDKppFH

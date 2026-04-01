@@ -1,0 +1,231 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e4]:
+  - complementary [ref=e5]:
+    - generic [ref=e7]:
+      - img [ref=e8]
+      - generic [ref=e12]:
+        - heading "BillSathi" [level=1] [ref=e13]
+        - paragraph [ref=e14]: MANAGER
+    - navigation [ref=e15]:
+      - link "Dashboard" [ref=e16] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e18]
+        - generic [ref=e23]: Dashboard
+      - link "Billing" [ref=e24] [cursor=pointer]:
+        - /url: /billing
+        - img [ref=e26]
+        - generic [ref=e30]: Billing
+      - link "Returns & Refunds" [ref=e31] [cursor=pointer]:
+        - /url: /returns
+        - img [ref=e33]
+        - generic [ref=e36]: Returns & Refunds
+      - link "Inventory" [ref=e37] [cursor=pointer]:
+        - /url: /inventory
+        - img [ref=e39]
+        - generic [ref=e43]: Inventory
+      - button "Purchase Management" [ref=e45] [cursor=pointer]:
+        - generic [ref=e46]:
+          - img [ref=e48]
+          - generic [ref=e51]: Purchase Management
+        - img [ref=e52]
+      - link "Customers" [ref=e54] [cursor=pointer]:
+        - /url: /customers
+        - img [ref=e56]
+        - generic [ref=e61]: Customers
+      - link "Reports" [ref=e62] [cursor=pointer]:
+        - /url: /reports
+        - img [ref=e64]
+        - generic [ref=e65]: Reports
+  - generic [ref=e66]:
+    - banner [ref=e67]:
+      - generic [ref=e68]:
+        - heading "Welcome, Inv Manager A" [level=1] [ref=e69]
+        - paragraph [ref=e70]: Today is 3/22/2026
+      - generic [ref=e71]:
+        - button "Switch to Dark Mode" [ref=e72] [cursor=pointer]:
+          - img [ref=e73]
+        - button "3" [ref=e75] [cursor=pointer]:
+          - img [ref=e76]
+          - generic [ref=e79]: "3"
+        - button "I Inv Manager A" [ref=e81] [cursor=pointer]:
+          - generic [ref=e82]: I
+          - generic [ref=e83]: Inv Manager A
+          - img [ref=e84]
+    - main [ref=e86]:
+      - generic [ref=e87]:
+        - generic [ref=e88]:
+          - generic [ref=e89]:
+            - heading "Analytics Dashboard" [level=1] [ref=e90]
+            - paragraph [ref=e91]: Comprehensive business insights and metrics
+            - paragraph [ref=e92]: "Range: 2026-02-21 to 2026-03-22"
+          - generic [ref=e93]:
+            - combobox [ref=e94]:
+              - option "All time"
+              - option "Today"
+              - option "Last 30 days" [selected]
+              - option "Last 7 days"
+              - option "Last 90 days"
+              - option "This year"
+              - option "Custom range"
+            - generic [ref=e95]:
+              - textbox [ref=e96]: 2026-03-22
+              - generic [ref=e97]: to
+              - textbox [ref=e98]: 2026-03-22
+              - button "Apply" [ref=e99] [cursor=pointer]
+            - button "Download" [ref=e101] [cursor=pointer]:
+              - img [ref=e102]
+              - text: Download
+              - img [ref=e105]
+        - navigation [ref=e108]:
+          - button "Overview" [ref=e109] [cursor=pointer]:
+            - img [ref=e110]
+            - generic [ref=e112]: Overview
+          - button "Sales Analytics" [ref=e113] [cursor=pointer]:
+            - img [ref=e114]
+            - generic [ref=e117]: Sales Analytics
+          - button "Returns & Refunds" [ref=e118] [cursor=pointer]:
+            - img [ref=e119]
+            - generic [ref=e122]: Returns & Refunds
+          - button "Inventory" [ref=e123] [cursor=pointer]:
+            - img [ref=e124]
+            - generic [ref=e128]: Inventory
+          - button "Customers" [ref=e129] [cursor=pointer]:
+            - img [ref=e130]
+            - generic [ref=e135]: Customers
+          - button "Performance" [ref=e136] [cursor=pointer]:
+            - img [ref=e137]
+            - generic [ref=e139]: Performance
+          - button "Trends" [ref=e140] [cursor=pointer]:
+            - img [ref=e141]
+            - generic [ref=e144]: Trends
+        - generic [ref=e145]:
+          - generic [ref=e146]:
+            - generic [ref=e148]:
+              - generic [ref=e149]:
+                - heading "Today's Sales" [level=3] [ref=e150]
+                - paragraph [ref=e151]: ₹3,340.06
+                - paragraph [ref=e152]: Daily revenue
+                - generic [ref=e153]:
+                  - img [ref=e154]
+                  - generic [ref=e157]: +5.2% from yesterday
+              - img [ref=e159]
+            - generic [ref=e163]:
+              - generic [ref=e164]:
+                - heading "Monthly Sales" [level=3] [ref=e165]
+                - paragraph [ref=e166]: ₹3,340.06
+                - paragraph [ref=e167]: Monthly revenue
+                - generic [ref=e168]:
+                  - img [ref=e169]
+                  - generic [ref=e172]: +0.0% vs previous period
+              - img [ref=e174]
+            - generic [ref=e178]:
+              - generic [ref=e179]:
+                - heading "Total Products" [level=3] [ref=e180]
+                - paragraph [ref=e181]: "70"
+                - paragraph [ref=e182]: In inventory
+              - img [ref=e184]
+            - generic [ref=e189]:
+              - generic [ref=e190]:
+                - heading "Active Customers" [level=3] [ref=e191]
+                - paragraph [ref=e192]: "3"
+                - paragraph [ref=e193]: Registered users
+                - generic [ref=e194]:
+                  - img [ref=e195]
+                  - generic [ref=e198]: +0.0% vs previous period
+              - img [ref=e200]
+          - generic [ref=e205]:
+            - generic [ref=e206]:
+              - heading "Sales Trend" [level=2] [ref=e207]
+              - img [ref=e209]
+            - generic [ref=e210]:
+              - heading "Category Performance" [level=2] [ref=e211]
+              - img [ref=e213]
+          - generic [ref=e214]:
+            - heading "Recent Transactions" [level=2] [ref=e216]
+            - table [ref=e218]:
+              - rowgroup [ref=e219]:
+                - 'row "Bill # Customer Date Amount Status" [ref=e220]':
+                  - 'columnheader "Bill #" [ref=e221]'
+                  - columnheader "Customer" [ref=e222]
+                  - columnheader "Date" [ref=e223]
+                  - columnheader "Amount" [ref=e224]
+                  - columnheader "Status" [ref=e225]
+              - rowgroup [ref=e226]:
+                - row "IVA647-000019 M7 Customer A 1774125513 3/22/2026 ₹400.01 Completed" [ref=e227]:
+                  - cell "IVA647-000019" [ref=e228]
+                  - cell "M7 Customer A 1774125513" [ref=e229]
+                  - cell "3/22/2026" [ref=e230]
+                  - cell "₹400.01" [ref=e231]
+                  - cell "Completed" [ref=e232]:
+                    - generic [ref=e233]: Completed
+                - row "IVA647-000017 M7 Customer A 1774125484 3/22/2026 ₹400.01 Completed" [ref=e234]:
+                  - cell "IVA647-000017" [ref=e235]
+                  - cell "M7 Customer A 1774125484" [ref=e236]
+                  - cell "3/22/2026" [ref=e237]
+                  - cell "₹400.01" [ref=e238]
+                  - cell "Completed" [ref=e239]:
+                    - generic [ref=e240]: Completed
+                - row "IVA647-000015 M7 Customer A 1774125413 3/22/2026 ₹400.01 Completed" [ref=e241]:
+                  - cell "IVA647-000015" [ref=e242]
+                  - cell "M7 Customer A 1774125413" [ref=e243]
+                  - cell "3/22/2026" [ref=e244]
+                  - cell "₹400.01" [ref=e245]
+                  - cell "Completed" [ref=e246]:
+                    - generic [ref=e247]: Completed
+                - row "IVA647-000014 Walk-in Customer 3/22/2026 ₹150.00 Completed" [ref=e248]:
+                  - cell "IVA647-000014" [ref=e249]
+                  - cell "Walk-in Customer" [ref=e250]
+                  - cell "3/22/2026" [ref=e251]
+                  - cell "₹150.00" [ref=e252]
+                  - cell "Completed" [ref=e253]:
+                    - generic [ref=e254]: Completed
+                - row "IVA647-000013 Walk-in Customer 3/22/2026 ₹120.00 Completed" [ref=e255]:
+                  - cell "IVA647-000013" [ref=e256]
+                  - cell "Walk-in Customer" [ref=e257]
+                  - cell "3/22/2026" [ref=e258]
+                  - cell "₹120.00" [ref=e259]
+                  - cell "Completed" [ref=e260]:
+                    - generic [ref=e261]: Completed
+                - row "IVA647-000011 Walk-in Customer 3/22/2026 ₹360.01 Completed" [ref=e262]:
+                  - cell "IVA647-000011" [ref=e263]
+                  - cell "Walk-in Customer" [ref=e264]
+                  - cell "3/22/2026" [ref=e265]
+                  - cell "₹360.01" [ref=e266]
+                  - cell "Completed" [ref=e267]:
+                    - generic [ref=e268]: Completed
+                - row "IVA647-000010 Walk-in Customer 3/22/2026 ₹120.00 Completed" [ref=e269]:
+                  - cell "IVA647-000010" [ref=e270]
+                  - cell "Walk-in Customer" [ref=e271]
+                  - cell "3/22/2026" [ref=e272]
+                  - cell "₹120.00" [ref=e273]
+                  - cell "Completed" [ref=e274]:
+                    - generic [ref=e275]: Completed
+                - row "IVA647-000008 Walk-in Customer 3/22/2026 ₹360.01 Completed" [ref=e276]:
+                  - cell "IVA647-000008" [ref=e277]
+                  - cell "Walk-in Customer" [ref=e278]
+                  - cell "3/22/2026" [ref=e279]
+                  - cell "₹360.01" [ref=e280]
+                  - cell "Completed" [ref=e281]:
+                    - generic [ref=e282]: Completed
+                - row "IVA647-000007 Walk-in Customer 3/22/2026 ₹120.00 Completed" [ref=e283]:
+                  - cell "IVA647-000007" [ref=e284]
+                  - cell "Walk-in Customer" [ref=e285]
+                  - cell "3/22/2026" [ref=e286]
+                  - cell "₹120.00" [ref=e287]
+                  - cell "Completed" [ref=e288]:
+                    - generic [ref=e289]: Completed
+                - row "IVA647-000005 Walk-in Customer 3/22/2026 ₹240.01 Completed" [ref=e290]:
+                  - cell "IVA647-000005" [ref=e291]
+                  - cell "Walk-in Customer" [ref=e292]
+                  - cell "3/22/2026" [ref=e293]
+                  - cell "₹240.01" [ref=e294]
+                  - cell "Completed" [ref=e295]:
+                    - generic [ref=e296]: Completed
+    - generic [ref=e298]:
+      - generic [ref=e299]: "Keyboard Shortcuts:"
+      - generic [ref=e300]:
+        - generic [ref=e301]: F2
+        - text: Focus Search
+```

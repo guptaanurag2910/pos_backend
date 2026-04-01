@@ -1,0 +1,237 @@
+
+> gofrugal-pos-react@0.1.0 test:e2e
+> playwright test
+
+
+Running 6 tests using 2 workers
+
+  ✘  1 [chromium] › tests/e2e/returns.spec.ts:10:3 › Returns flow › create return from completed bill (12.9s)
+  ✘  2 [chromium] › tests/e2e/billing.spec.ts:10:3 › Billing flow › add product by search, apply/remove discount, complete cash payment (12.9s)
+  ✘  4 [chromium] › tests/e2e/billing.spec.ts:40:3 › Billing flow › hold and resume bill (12.0s)
+  ✘  3 [chromium] › tests/e2e/returns.spec.ts:43:3 › Returns flow › open return details from list (12.4s)
+  ✘  5 [chromium] › tests/e2e/billing.spec.ts:54:3 › Billing flow › out-of-stock product is not added to cart (11.0s)
+  ✘  6 [chromium] › tests/e2e/billing.spec.ts:79:3 › Billing flow › barcode style input works (scanner simulation) (11.5s)
+
+
+  1) [chromium] › tests/e2e/billing.spec.ts:10:3 › Billing flow › add product by search, apply/remove discount, complete cash payment 
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+
+    Locator: getByRole('heading', { name: 'Billing' })
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+    [2m  - Expect "toBeVisible" with timeout 10000ms[22m
+    [2m  - waiting for getByRole('heading', { name: 'Billing' })[22m
+
+
+       at helpers.ts:22
+
+      20 | export async function gotoBilling(page: Page): Promise<void> {
+      21 |   await page.goto('/billing');
+    > 22 |   await expect(page.getByRole('heading', { name: 'Billing' })).toBeVisible();
+         |                                                                ^
+      23 | }
+      24 |
+      25 | export async function gotoReturns(page: Page): Promise<void> {
+        at gotoBilling (/Users/anurag/Library/CloudStorage/OneDrive-CargillInc/Desktop/AAA_POS/pos/pos_fe/tests/e2e/helpers.ts:22:64)
+        at /Users/anurag/Library/CloudStorage/OneDrive-CargillInc/Desktop/AAA_POS/pos/pos_fe/tests/e2e/billing.spec.ts:7:5
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/billing-Billing-flow-add-p-1aa98-count-complete-cash-payment-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/billing-Billing-flow-add-p-1aa98-count-complete-cash-payment-chromium/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/billing-Billing-flow-add-p-1aa98-count-complete-cash-payment-chromium/error-context.md
+
+  2) [chromium] › tests/e2e/billing.spec.ts:40:3 › Billing flow › hold and resume bill ─────────────
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+
+    Locator: getByRole('heading', { name: 'Billing' })
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+    [2m  - Expect "toBeVisible" with timeout 10000ms[22m
+    [2m  - waiting for getByRole('heading', { name: 'Billing' })[22m
+
+
+       at helpers.ts:22
+
+      20 | export async function gotoBilling(page: Page): Promise<void> {
+      21 |   await page.goto('/billing');
+    > 22 |   await expect(page.getByRole('heading', { name: 'Billing' })).toBeVisible();
+         |                                                                ^
+      23 | }
+      24 |
+      25 | export async function gotoReturns(page: Page): Promise<void> {
+        at gotoBilling (/Users/anurag/Library/CloudStorage/OneDrive-CargillInc/Desktop/AAA_POS/pos/pos_fe/tests/e2e/helpers.ts:22:64)
+        at /Users/anurag/Library/CloudStorage/OneDrive-CargillInc/Desktop/AAA_POS/pos/pos_fe/tests/e2e/billing.spec.ts:7:5
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/billing-Billing-flow-hold-and-resume-bill-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/billing-Billing-flow-hold-and-resume-bill-chromium/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/billing-Billing-flow-hold-and-resume-bill-chromium/error-context.md
+
+  3) [chromium] › tests/e2e/billing.spec.ts:54:3 › Billing flow › out-of-stock product is not added to cart 
+
+    Error: [2mexpect([22m[31mpage[39m[2m).[22mtoHaveURL[2m([22m[32mexpected[39m[2m)[22m failed
+
+    Expected pattern: [32m/\/dashboard/[39m
+    Received string:  [31m"http://127.0.0.1:4173/login"[39m
+    Timeout: 10000ms
+
+    Call log:
+    [2m  - Expect "toHaveURL" with timeout 10000ms[22m
+    [2m    14 × unexpected value "http://127.0.0.1:4173/login"[22m
+
+
+       at helpers.ts:17
+
+      15 |   await page.getByRole('button', { name: /sign in/i }).click();
+      16 |
+    > 17 |   await expect(page).toHaveURL(/\/dashboard/);
+         |                      ^
+      18 | }
+      19 |
+      20 | export async function gotoBilling(page: Page): Promise<void> {
+        at login (/Users/anurag/Library/CloudStorage/OneDrive-CargillInc/Desktop/AAA_POS/pos/pos_fe/tests/e2e/helpers.ts:17:22)
+        at /Users/anurag/Library/CloudStorage/OneDrive-CargillInc/Desktop/AAA_POS/pos/pos_fe/tests/e2e/billing.spec.ts:6:5
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/billing-Billing-flow-out-o-67a85-roduct-is-not-added-to-cart-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/billing-Billing-flow-out-o-67a85-roduct-is-not-added-to-cart-chromium/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/billing-Billing-flow-out-o-67a85-roduct-is-not-added-to-cart-chromium/error-context.md
+
+  4) [chromium] › tests/e2e/billing.spec.ts:79:3 › Billing flow › barcode style input works (scanner simulation) 
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+
+    Locator: getByRole('heading', { name: 'Billing' })
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+    [2m  - Expect "toBeVisible" with timeout 10000ms[22m
+    [2m  - waiting for getByRole('heading', { name: 'Billing' })[22m
+
+
+       at helpers.ts:22
+
+      20 | export async function gotoBilling(page: Page): Promise<void> {
+      21 |   await page.goto('/billing');
+    > 22 |   await expect(page.getByRole('heading', { name: 'Billing' })).toBeVisible();
+         |                                                                ^
+      23 | }
+      24 |
+      25 | export async function gotoReturns(page: Page): Promise<void> {
+        at gotoBilling (/Users/anurag/Library/CloudStorage/OneDrive-CargillInc/Desktop/AAA_POS/pos/pos_fe/tests/e2e/helpers.ts:22:64)
+        at /Users/anurag/Library/CloudStorage/OneDrive-CargillInc/Desktop/AAA_POS/pos/pos_fe/tests/e2e/billing.spec.ts:7:5
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/billing-Billing-flow-barco-0619d-t-works-scanner-simulation--chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/billing-Billing-flow-barco-0619d-t-works-scanner-simulation--chromium/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/billing-Billing-flow-barco-0619d-t-works-scanner-simulation--chromium/error-context.md
+
+  5) [chromium] › tests/e2e/returns.spec.ts:10:3 › Returns flow › create return from completed bill 
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+
+    Locator: getByRole('heading', { name: /returns & refunds/i })
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+    [2m  - Expect "toBeVisible" with timeout 10000ms[22m
+    [2m  - waiting for getByRole('heading', { name: /returns & refunds/i })[22m
+
+
+       at helpers.ts:27
+
+      25 | export async function gotoReturns(page: Page): Promise<void> {
+      26 |   await page.goto('/returns');
+    > 27 |   await expect(page.getByRole('heading', { name: /returns & refunds/i })).toBeVisible();
+         |                                                                           ^
+      28 | }
+      29 |
+      30 | export async function addFirstInStockProduct(page: Page): Promise<{ name: string; barcode: string } | null> {
+        at gotoReturns (/Users/anurag/Library/CloudStorage/OneDrive-CargillInc/Desktop/AAA_POS/pos/pos_fe/tests/e2e/helpers.ts:27:75)
+        at /Users/anurag/Library/CloudStorage/OneDrive-CargillInc/Desktop/AAA_POS/pos/pos_fe/tests/e2e/returns.spec.ts:7:5
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/returns-Returns-flow-create-return-from-completed-bill-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/returns-Returns-flow-create-return-from-completed-bill-chromium/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/returns-Returns-flow-create-return-from-completed-bill-chromium/error-context.md
+
+  6) [chromium] › tests/e2e/returns.spec.ts:43:3 › Returns flow › open return details from list ────
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+
+    Locator: getByRole('heading', { name: /returns & refunds/i })
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+    [2m  - Expect "toBeVisible" with timeout 10000ms[22m
+    [2m  - waiting for getByRole('heading', { name: /returns & refunds/i })[22m
+
+
+       at helpers.ts:27
+
+      25 | export async function gotoReturns(page: Page): Promise<void> {
+      26 |   await page.goto('/returns');
+    > 27 |   await expect(page.getByRole('heading', { name: /returns & refunds/i })).toBeVisible();
+         |                                                                           ^
+      28 | }
+      29 |
+      30 | export async function addFirstInStockProduct(page: Page): Promise<{ name: string; barcode: string } | null> {
+        at gotoReturns (/Users/anurag/Library/CloudStorage/OneDrive-CargillInc/Desktop/AAA_POS/pos/pos_fe/tests/e2e/helpers.ts:27:75)
+        at /Users/anurag/Library/CloudStorage/OneDrive-CargillInc/Desktop/AAA_POS/pos/pos_fe/tests/e2e/returns.spec.ts:7:5
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/returns-Returns-flow-open-return-details-from-list-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/returns-Returns-flow-open-return-details-from-list-chromium/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/returns-Returns-flow-open-return-details-from-list-chromium/error-context.md
+
+  6 failed
+    [chromium] › tests/e2e/billing.spec.ts:10:3 › Billing flow › add product by search, apply/remove discount, complete cash payment 
+    [chromium] › tests/e2e/billing.spec.ts:40:3 › Billing flow › hold and resume bill ──────────────
+    [chromium] › tests/e2e/billing.spec.ts:54:3 › Billing flow › out-of-stock product is not added to cart 
+    [chromium] › tests/e2e/billing.spec.ts:79:3 › Billing flow › barcode style input works (scanner simulation) 
+    [chromium] › tests/e2e/returns.spec.ts:10:3 › Returns flow › create return from completed bill ─
+    [chromium] › tests/e2e/returns.spec.ts:43:3 › Returns flow › open return details from list ─────

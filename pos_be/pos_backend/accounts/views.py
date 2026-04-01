@@ -6,7 +6,7 @@ from rest_framework import status, viewsets, generics
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import action
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.contrib.auth import get_user_model
@@ -21,7 +21,7 @@ from .serializers import (
     UserSerializer, CustomTokenObtainPairSerializer, ChangePasswordSerializer, 
     UserSessionSerializer, AuditLogSerializer, LogoutSerializer, RegistrationSerializer,
     RegistrationWithStoreSerializer, ForgotPasswordOTPRequestSerializer,
-    ForgotPasswordOTPConfirmSerializer
+    ForgotPasswordOTPConfirmSerializer, CustomTokenRefreshSerializer
 )
 from .models import UserSession, AuditLog, PasswordResetOTP
 from .permissions import IsAdminUser, IsManagerUser, IsOwnerOrAdmin
@@ -32,6 +32,13 @@ User = get_user_model()
 logger = logging.getLogger('accounts')
 GENERIC_FORGOT_PASSWORD_MESSAGE = "If the account exists, an OTP has been sent to the store recovery email."
 INVALID_OR_EXPIRED_OTP_MESSAGE = "Invalid or expired OTP."
+
+
+def _is_global_admin(user):
+    return bool(
+        getattr(user, 'is_superuser', False) or
+        (getattr(user, 'role', None) == 'admin' and not getattr(user, 'store_id', None))
+    )
 
 
 class RegisterView(generics.CreateAPIView):
@@ -116,6 +123,10 @@ class CustomTokenObtainPairView(TokenObtainPairView):
         
         return response
 
+
+class CustomTokenRefreshView(TokenRefreshView):
+    serializer_class = CustomTokenRefreshSerializer
+
 class LogoutView(generics.GenericAPIView):
     permission_classes = [AllowAny]
     serializer_class = LogoutSerializer
@@ -135,15 +146,16 @@ class LogoutView(generics.GenericAPIView):
                 pass
             
             # Update user session
+            session_qs = UserSession.objects.filter(
+                session_key=refresh_token,
+                is_active=True
+            )
             if actor:
-                UserSession.objects.filter(
-                    user=actor,
-                    session_key=refresh_token,
-                    is_active=True
-                ).update(
-                    logout_time=timezone.now(),
-                    is_active=False
-                )
+                session_qs = session_qs.filter(user=actor)
+            session_qs.update(
+                logout_time=timezone.now(),
+                is_active=False
+            )
             
             # Log logout activity
             if actor:
@@ -311,24 +323,24 @@ class UserViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     
     def get_permissions(self):
-        if self.action == 'create':
+        if self.action in ['create', 'reset_password', 'create_store_user']:
             permission_classes = [IsAdminUser]
-        elif self.action in ['reset_password']:
-            permission_classes = [IsAdminUser]
+        elif self.action in ['me', 'force_logout_sessions']:
+            permission_classes = [IsAuthenticated]
         elif self.action in ['update', 'partial_update', 'destroy']:
             permission_classes = [IsOwnerOrAdmin]
-        elif self.action in ['force_logout_sessions']:
-            permission_classes = [IsAuthenticated]
         else:
             permission_classes = [IsAuthenticated, IsManagerUser]
         return [permission() for permission in permission_classes]
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'admin':
-            return User.objects.filter(store=user.store) if user.store else User.objects.none()
-        elif user.role == 'manager':
-            return User.objects.filter(store=user.store)
+        if _is_global_admin(user):
+            return User.objects.all()
+        if user.role in ['admin', 'manager']:
+            if user.store:
+                return User.objects.filter(store=user.store)
+            return User.objects.none()
         return User.objects.filter(id=user.id)
     
     @action(detail=False, methods=['get'])
@@ -544,9 +556,9 @@ class UserSessionViewSet(viewsets.ReadOnlyModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'admin':
+        if _is_global_admin(user):
             return UserSession.objects.all()
-        elif user.role == 'manager':
+        if user.role in ['admin', 'manager'] and user.store:
             return UserSession.objects.filter(user__store=user.store)
         return UserSession.objects.filter(user=user)
 
@@ -557,8 +569,8 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'admin':
+        if _is_global_admin(user):
             return AuditLog.objects.all()
-        elif user.role == 'manager':
+        if user.role in ['admin', 'manager'] and user.store:
             return AuditLog.objects.filter(user__store=user.store)
         return AuditLog.objects.filter(user=user)

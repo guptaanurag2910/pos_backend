@@ -1,0 +1,5 @@
+PASS|M3-SETUP-01|Admin A login
+PASS|M3-SETUP-02|Admin B login
+FAIL|M3-SETUP-03|Manager A login failed
+PASS|M3-SETUP-04|Cashier A login
+TOTAL=4 PASS=3 FAIL=1 TMP_DIR=/var/folders/mr/hb9y1fjn09xdk30yc6gv9jj40000gn/T/tmp.nGGd0haUZ6

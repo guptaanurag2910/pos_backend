@@ -1,6 +1,9 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from django.utils import timezone
+from rest_framework_simplejwt.exceptions import InvalidToken
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
+from rest_framework_simplejwt.tokens import RefreshToken
 from stores.models import Store
 from stores.serializers import StoreSerializer
 from .models import UserSession, AuditLog
@@ -103,6 +106,48 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             'store_id': self.user.store.id if self.user.store else None,
         })
         
+        return data
+
+
+class CustomTokenRefreshSerializer(TokenRefreshSerializer):
+    """
+    Refresh token validation with server-side active-session enforcement.
+    This ensures logout can immediately invalidate refresh tokens even when
+    SimpleJWT blacklist backend is unavailable.
+    """
+
+    def validate(self, attrs):
+        refresh_token = attrs.get('refresh')
+        try:
+            decoded = RefreshToken(refresh_token)
+            user_id = decoded.get('user_id')
+        except Exception:
+            raise InvalidToken("Token is invalid or expired.")
+
+        active_session = UserSession.objects.filter(
+            user_id=user_id,
+            session_key=refresh_token,
+            is_active=True,
+        ).first()
+        if not active_session:
+            raise InvalidToken("Session is no longer active. Please login again.")
+
+        data = super().validate(attrs)
+        new_refresh = data.get('refresh')
+
+        # Track refresh-token rotation in UserSession so old tokens cannot be reused.
+        if new_refresh and new_refresh != refresh_token:
+            now = timezone.now()
+            active_session.is_active = False
+            active_session.logout_time = now
+            active_session.save(update_fields=['is_active', 'logout_time'])
+            UserSession.objects.create(
+                user_id=user_id,
+                session_key=new_refresh,
+                ip_address=active_session.ip_address,
+                device_info=active_session.device_info,
+            )
+
         return data
 
 class UserSerializer(serializers.ModelSerializer):

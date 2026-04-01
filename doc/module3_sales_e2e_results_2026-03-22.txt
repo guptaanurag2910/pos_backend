@@ -1,0 +1,38 @@
+PASS|M3-SETUP-01|Admin A login
+PASS|M3-SETUP-02|Admin B login
+PASS|M3-SETUP-03|Manager A login
+PASS|M3-SETUP-04|Cashier A login
+PASS|M3-SETUP-05|Create sales category
+PASS|M3-SETUP-06|Create Store A product
+PASS|M3-SETUP-07|Create Store B product
+PASS|M3-001|Read initial stock for product A
+PASS|M3-002|Create bill with empty items rejected
+PASS|M3-003|Create bill with overstock quantity rejected
+PASS|M3-004|Create draft bill with valid items
+PASS|M3-005|Invalid payment split detected
+PASS|M3-006|Valid payment split accepted
+PASS|M3-007|Bill hold works
+PASS|M3-008|Bill resume works
+PASS|M3-009|Complete without payment_method and unpaid rejected
+PASS|M3-010|Create partial payment
+PASS|M3-011|Complete bill generates invoice and completes
+PASS|M3-012|Receipt GET works for completed bill
+PASS|M3-013|Receipt reprint POST works
+PASS|M3-014|Cancel completed bill blocked
+PASS|M3-015|Cannot add items to completed bill
+PASS|M3-016|Stock reduced correctly after bill completion
+PASS|M3-017|Payment list for bill available
+PASS|M3-018|Payment refund endpoint works
+PASS|M3-019|Create second draft bill
+PASS|M3-020|Cancel draft bill works
+PASS|M3-021|Complete cancelled bill blocked
+PASS|M3-022|Cashier can create bill
+PASS|M3-023|Cashier can complete bill
+PASS|M3-024|Zero payment amount rejected
+PASS|M3-025|Store B bill create
+PASS|M3-026|Store B bill complete
+PASS|M3-027|Store B payment exists
+PASS|M3-028|Store A admin cannot access Store B bill
+PASS|M3-029|Manager A cannot access Store B bill
+PASS|M3-030|Store A admin cannot access Store B payment
+TOTAL=37 PASS=37 FAIL=0 TMP_DIR=/var/folders/mr/hb9y1fjn09xdk30yc6gv9jj40000gn/T/tmp.Q3DoFPJEQE

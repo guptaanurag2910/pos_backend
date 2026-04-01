@@ -5,6 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.exceptions import PermissionDenied
 from django.db import transaction
 
 from .models import Store, StoreSettings
@@ -17,13 +18,30 @@ from accounts.utils import get_client_ip
 logger = logging.getLogger('stores')
 
 
+def _is_global_admin(user):
+    return bool(
+        getattr(user, 'is_superuser', False) or
+        (getattr(user, 'role', None) == 'admin' and not getattr(user, 'store_id', None))
+    )
+
+
+def _require_global_admin(user):
+    if not _is_global_admin(user):
+        raise PermissionDenied("Only global admins can perform this action.")
+
+
 class StoreViewSet(viewsets.ModelViewSet):
     queryset = Store.objects.all()
     serializer_class = StoreSerializer
     permission_classes = [IsAuthenticated, IsManagerUser]
     
     def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy', 'activate', 'deactivate', 'set_main', 'bootstrap_import']:
+        if self.action == 'store_settings':
+            if self.request.method in ['PUT', 'PATCH']:
+                permission_classes = [IsManagerUser]
+            else:
+                permission_classes = [IsAuthenticated]
+        elif self.action in ['create', 'update', 'partial_update', 'destroy', 'activate', 'deactivate', 'set_main', 'bootstrap_import']:
             permission_classes = [IsAdminUser]
         else:
             permission_classes = [IsAuthenticated]
@@ -37,7 +55,7 @@ class StoreViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'admin':
+        if _is_global_admin(user):
             return Store.objects.all()
         elif user.store:
             return Store.objects.filter(id=user.store.id)
@@ -80,6 +98,7 @@ class StoreViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def activate(self, request, pk=None):
+        _require_global_admin(request.user)
         store = self.get_object()
         store.is_active = True
         store.save(update_fields=['is_active', 'updated_at'])
@@ -96,6 +115,7 @@ class StoreViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def deactivate(self, request, pk=None):
+        _require_global_admin(request.user)
         store = self.get_object()
         store.is_active = False
         store.save(update_fields=['is_active', 'updated_at'])
@@ -112,6 +132,7 @@ class StoreViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def set_main(self, request, pk=None):
+        _require_global_admin(request.user)
         store = self.get_object()
         with transaction.atomic():
             Store.objects.exclude(id=store.id).update(is_main=False)
@@ -130,6 +151,7 @@ class StoreViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='bootstrap-import')
     def bootstrap_import(self, request, pk=None):
+        _require_global_admin(request.user)
         store = self.get_object()
         logger.info(
             f"Store bootstrap import started store_id={store.id} store_code={store.code} user_id={request.user.id}"
@@ -177,6 +199,7 @@ class StoreViewSet(viewsets.ModelViewSet):
         return Response(result, status=http_status)
     
     def perform_create(self, serializer):
+        _require_global_admin(self.request.user)
         with transaction.atomic():
             store = serializer.save()
             
@@ -194,6 +217,7 @@ class StoreViewSet(viewsets.ModelViewSet):
             )
     
     def perform_update(self, serializer):
+        _require_global_admin(self.request.user)
         with transaction.atomic():
             store = serializer.save()
             
@@ -208,6 +232,7 @@ class StoreViewSet(viewsets.ModelViewSet):
             )
 
     def perform_destroy(self, instance):
+        _require_global_admin(self.request.user)
         # Soft delete for safer production operations
         instance.is_active = False
         instance.save(update_fields=['is_active', 'updated_at'])

@@ -1,0 +1,50 @@
+PASS|M4-SETUP-01|Admin A login
+PASS|M4-SETUP-02|Admin B login
+PASS|M4-SETUP-03|Manager A login
+PASS|M4-SETUP-04|Cashier A login
+PASS|M4-SETUP-05|Create category for return tests
+PASS|M4-SETUP-06|Create store A product A
+PASS|M4-SETUP-07|Create store B product B
+PASS|M4-SETUP-08|Create store A product C
+PASS|M4-SETUP-09|Create bill A draft
+PASS|M4-SETUP-10|Complete bill A
+PASS|M4-SETUP-11|Create draft-only bill D
+PASS|M4-SETUP-12|Create bill B draft (store B)
+PASS|M4-SETUP-13|Complete bill B (store B)
+PASS|M4-SETUP-14|Create bill C draft
+PASS|M4-SETUP-15|Complete bill C
+PASS|M4-001|Cashier cannot create return
+PASS|M4-002|Return for draft bill rejected
+PASS|M4-003|Return create without items rejected
+PASS|M4-004|Return amount mismatch rejected
+PASS|M4-005|Valid return created in pending
+PASS|M4-006|Complete pending return blocked
+PASS|M4-007|Update pending return allowed
+PASS|M4-008|Approve pending return
+PASS|M4-009|Approve already approved return blocked
+PASS|M4-010|Update approved return blocked
+PASS|M4-011|Reject approved return blocked
+PASS|M4-012|Complete approved return
+PASS|M4-013|Complete already completed return blocked
+PASS|M4-014|Stock increased by return quantity
+PASS|M4-015|Refund posting created negative payment
+PASS|M4-016|Over-return quantity rejected
+PASS|M4-017|Second pending return created
+PASS|M4-018|Reject pending return works
+PASS|M4-019|Complete rejected return blocked
+PASS|M4-020|Create temp pending return
+PASS|M4-021|Soft delete return endpoint returns 204
+PASS|M4-022|Soft-deleted return hidden by default
+PASS|M4-023|Soft-deleted return visible with include_inactive
+PASS|M4-024|Store B return create works
+PASS|M4-025|Store A admin cannot access Store B return
+PASS|M4-026|Manager A cannot access Store B return
+PASS|M4-027|Store A return list excludes Store B returns
+PASS|M4-028|Store A admin cross-store return create blocked
+PASS|M4-029|Cashier cannot approve return
+PASS|M4-030|Refund bill C payment for net-paid check
+PASS|M4-031|Create return C
+PASS|M4-032|Approve return C
+PASS|M4-033|Complete return blocked when refund exceeds net paid
+PASS|M4-034|Return refund amount greater than bill total rejected
+TOTAL=49 PASS=49 FAIL=0 TMP_DIR=/var/folders/mr/hb9y1fjn09xdk30yc6gv9jj40000gn/T/tmp.E2pNpbiPpq

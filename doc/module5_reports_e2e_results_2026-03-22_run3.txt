@@ -1,0 +1,8 @@
+PASS|M5-SETUP-01|Admin A login
+PASS|M5-SETUP-02|Admin B login
+PASS|M5-SETUP-03|Manager A login
+PASS|M5-SETUP-04|Cashier A login
+PASS|M5-SETUP-05|Create category for reports seed
+PASS|M5-SETUP-06|Create store A report seed product
+FAIL|M5-SETUP-07|Create store B product failed status=400
+TOTAL=7 PASS=6 FAIL=1 TMP_DIR=/var/folders/mr/hb9y1fjn09xdk30yc6gv9jj40000gn/T/tmp.KhWesg9b9l

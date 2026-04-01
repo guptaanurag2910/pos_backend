@@ -1,0 +1,8 @@
+PASS|M3-SETUP-01|Admin A login
+PASS|M3-SETUP-02|Admin B login
+PASS|M3-SETUP-03|Manager A login
+PASS|M3-SETUP-04|Cashier A login
+PASS|M3-SETUP-05|Create sales category
+PASS|M3-SETUP-06|Create Store A product
+FAIL|M3-SETUP-07|Create Store B product (status=400)
+TOTAL=7 PASS=6 FAIL=1 TMP_DIR=/var/folders/mr/hb9y1fjn09xdk30yc6gv9jj40000gn/T/tmp.lTsL6Hm8wt

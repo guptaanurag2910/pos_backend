@@ -4,7 +4,7 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError, NotFound
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db import transaction, models
 from django.utils import timezone
@@ -38,6 +38,32 @@ def _to_decimal(value, default='0'):
         return Decimal(default)
 
 
+def _is_global_admin(user):
+    return bool(
+        getattr(user, 'is_superuser', False) or
+        (getattr(user, 'role', None) == 'admin' and not getattr(user, 'store_id', None))
+    )
+
+
+def _scope_store_queryset(queryset, user, store_field='store'):
+    if _is_global_admin(user):
+        return queryset
+    user_store_id = getattr(user, 'store_id', None)
+    if not user_store_id:
+        return queryset.none()
+    return queryset.filter(**{f'{store_field}_id': user_store_id})
+
+
+def _assert_user_store_access(user, target_store_id, field_name='store'):
+    if _is_global_admin(user):
+        return
+    user_store_id = getattr(user, 'store_id', None)
+    if not user_store_id:
+        raise ValidationError({field_name: "User is not assigned to a store."})
+    if target_store_id and str(target_store_id) != str(user_store_id):
+        raise ValidationError({field_name: "You can only access records for your assigned store."})
+
+
 def _resolve_store(request):
     """
     Resolve store for create flows:
@@ -47,11 +73,14 @@ def _resolve_store(request):
     4) first active store
     """
     user_store = getattr(request.user, 'store', None)
+    requested_store_id = request.data.get('store')
     if user_store:
+        if requested_store_id and str(requested_store_id) != str(user_store.id):
+            raise ValidationError({"store": "You can only access records for your assigned store."})
         logger.info(f"store_resolved_from_user user_id={request.user.id} store_id={user_store.id}")
         return user_store
 
-    store_id = request.data.get('store')
+    store_id = requested_store_id
     if store_id:
         try:
             store = Store.objects.get(id=store_id, is_active=True)
@@ -256,13 +285,9 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         if not user or not getattr(user, 'is_authenticated', False):
             return PurchaseOrder.objects.none()
         role = getattr(user, 'role', None)
-        if role == 'admin':
-            return PurchaseOrder.objects.all()
-        if role not in ['manager', 'cashier']:
+        if role not in ['admin', 'manager', 'cashier']:
             return PurchaseOrder.objects.none()
-        if not getattr(user, 'store', None):
-            return PurchaseOrder.objects.none()
-        return PurchaseOrder.objects.filter(store=user.store)
+        return _scope_store_queryset(PurchaseOrder.objects.all(), user)
     
     @action(detail=True, methods=['post'])
     def update_status(self, request, pk=None):
@@ -343,22 +368,31 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 class PurchaseOrderItemViewSet(viewsets.ModelViewSet):
     serializer_class = PurchaseOrderItemSerializer
     permission_classes = [IsAuthenticated, IsManagerUser]
-    
-    def get_queryset(self):
+
+    def _get_scoped_purchase_order(self):
         po_id = self.kwargs.get('po_pk')
-        if po_id:
-            return PurchaseOrderItem.objects.filter(purchase_order_id=po_id)
-        return PurchaseOrderItem.objects.none()
+        if not po_id:
+            raise NotFound("Purchase order not found.")
+        po = _scope_store_queryset(PurchaseOrder.objects.all(), self.request.user).filter(id=po_id).first()
+        if not po:
+            raise NotFound("Purchase order not found.")
+        return po
+
+    def get_queryset(self):
+        try:
+            purchase_order = self._get_scoped_purchase_order()
+        except NotFound:
+            return PurchaseOrderItem.objects.none()
+        return PurchaseOrderItem.objects.filter(purchase_order=purchase_order)
     
     def perform_create(self, serializer):
-        po_id = self.kwargs.get('po_pk')
-        purchase_order = PurchaseOrder.objects.get(id=po_id)
-        
+        purchase_order = self._get_scoped_purchase_order()
+
         if purchase_order.status not in ['draft', 'sent']:
             raise ValidationError({"detail": f"Cannot add items to a {purchase_order.status} purchase order"})
-        
+
         with transaction.atomic():
-            item = serializer.save(purchase_order_id=po_id)
+            item = serializer.save(purchase_order=purchase_order)
             
             # Update PO totals
             purchase_order.calculate_totals()
@@ -376,6 +410,9 @@ class PurchaseOrderItemViewSet(viewsets.ModelViewSet):
     
     def perform_update(self, serializer):
         with transaction.atomic():
+            existing_po = serializer.instance.purchase_order
+            if not _scope_store_queryset(PurchaseOrder.objects.all(), self.request.user).filter(id=existing_po.id).exists():
+                raise NotFound("Purchase order item not found.")
             item = serializer.save()
             
             # Update PO totals
@@ -395,7 +432,10 @@ class PurchaseOrderItemViewSet(viewsets.ModelViewSet):
     
     def perform_destroy(self, instance):
         purchase_order = instance.purchase_order
-        
+
+        if not _scope_store_queryset(PurchaseOrder.objects.all(), self.request.user).filter(id=purchase_order.id).exists():
+            raise NotFound("Purchase order item not found.")
+
         if purchase_order.status not in ['draft', 'sent']:
             raise ValidationError({"detail": f"Cannot remove items from a {purchase_order.status} purchase order"})
         
@@ -438,12 +478,7 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
         if role not in ['admin', 'manager', 'cashier']:
             return GoodsReceiptNote.objects.none()
         include_inactive = str(self.request.query_params.get('include_inactive', 'false')).lower() == 'true'
-        if role == 'admin':
-            qs = GoodsReceiptNote.objects.all()
-        elif not getattr(user, 'store', None):
-            qs = GoodsReceiptNote.objects.none()
-        else:
-            qs = GoodsReceiptNote.objects.filter(store=user.store)
+        qs = _scope_store_queryset(GoodsReceiptNote.objects.all(), user)
         if not include_inactive:
             qs = qs.filter(is_active=True)
         return qs
@@ -565,6 +600,9 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         with transaction.atomic():
             store = _resolve_store(self.request)
+            purchase_order = serializer.validated_data.get('purchase_order')
+            if purchase_order and purchase_order.store_id != store.id:
+                raise ValidationError({"purchase_order": "Purchase order belongs to a different store."})
             today = timezone.now().strftime('%Y%m%d')
 
             last_grn = GoodsReceiptNote.objects.filter(
@@ -643,22 +681,31 @@ class GoodsReceiptNoteViewSet(viewsets.ModelViewSet):
 class GoodsReceiptNoteItemViewSet(viewsets.ModelViewSet):
     serializer_class = GoodsReceiptNoteItemSerializer
     permission_classes = [IsAuthenticated, IsManagerUser]
-    
-    def get_queryset(self):
+
+    def _get_scoped_grn(self):
         grn_id = self.kwargs.get('grn_pk')
-        if grn_id:
-            return GoodsReceiptNoteItem.objects.filter(grn_id=grn_id)
-        return GoodsReceiptNoteItem.objects.none()
+        if not grn_id:
+            raise NotFound("GRN not found.")
+        grn = _scope_store_queryset(GoodsReceiptNote.objects.all(), self.request.user).filter(id=grn_id).first()
+        if not grn:
+            raise NotFound("GRN not found.")
+        return grn
+
+    def get_queryset(self):
+        try:
+            grn = self._get_scoped_grn()
+        except NotFound:
+            return GoodsReceiptNoteItem.objects.none()
+        return GoodsReceiptNoteItem.objects.filter(grn=grn)
     
     def perform_create(self, serializer):
-        grn_id = self.kwargs.get('grn_pk')
-        grn = GoodsReceiptNote.objects.get(id=grn_id)
-        
+        grn = self._get_scoped_grn()
+
         if grn.status == 'completed':
             raise ValidationError({"detail": "Cannot add items to a completed GRN"})
-        
+
         with transaction.atomic():
-            item = serializer.save(grn_id=grn_id)
+            item = serializer.save(grn=grn)
             
             # Update GRN totals
             grn.calculate_totals()
@@ -673,6 +720,21 @@ class GoodsReceiptNoteItemViewSet(viewsets.ModelViewSet):
                 ip_address=get_client_ip(self.request),
                 details={'grn': grn.grn_number}
             )
+
+    def perform_update(self, serializer):
+        with transaction.atomic():
+            existing_grn = serializer.instance.grn
+            if not _scope_store_queryset(GoodsReceiptNote.objects.all(), self.request.user).filter(id=existing_grn.id).exists():
+                raise NotFound("GRN item not found.")
+            item = serializer.save()
+            item.grn.calculate_totals()
+
+    def perform_destroy(self, instance):
+        grn = instance.grn
+        if not _scope_store_queryset(GoodsReceiptNote.objects.all(), self.request.user).filter(id=grn.id).exists():
+            raise NotFound("GRN item not found.")
+        instance.delete()
+        grn.calculate_totals()
 
 
 class SupplierInvoiceViewSet(viewsets.ModelViewSet):
@@ -693,12 +755,16 @@ class SupplierInvoiceViewSet(viewsets.ModelViewSet):
         if role not in ['admin', 'manager', 'cashier']:
             return SupplierInvoice.objects.none()
         include_inactive = str(self.request.query_params.get('include_inactive', 'false')).lower() == 'true'
-        if role == 'admin':
+        if _is_global_admin(user):
             qs = SupplierInvoice.objects.all()
-        elif not getattr(user, 'store', None):
-            qs = SupplierInvoice.objects.none()
         else:
-            qs = SupplierInvoice.objects.filter(Q(store=user.store) | Q(store__isnull=True))
+            user_store_id = getattr(user, 'store_id', None)
+            if not user_store_id:
+                return SupplierInvoice.objects.none()
+            qs = SupplierInvoice.objects.filter(
+                Q(store_id=user_store_id) |
+                Q(store__isnull=True, created_by=user)
+            )
         if not include_inactive:
             qs = qs.filter(is_active=True)
         return qs.order_by('-created_at')
@@ -707,6 +773,13 @@ class SupplierInvoiceViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             store = _resolve_store(self.request)
             supplier = serializer.validated_data.get('supplier')
+            purchase_order = serializer.validated_data.get('purchase_order')
+            grn = serializer.validated_data.get('grn')
+
+            if purchase_order and purchase_order.store_id != store.id:
+                raise ValidationError({"purchase_order": "Purchase order belongs to a different store."})
+            if grn and grn.store_id != store.id:
+                raise ValidationError({"grn": "GRN belongs to a different store."})
 
             if not serializer.validated_data.get('invoice_number'):
                 date_part = timezone.now().strftime('%Y%m%d')
@@ -754,6 +827,14 @@ class SupplierInvoiceViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         with transaction.atomic():
+            target_store_id = serializer.instance.store_id or getattr(self.request.user, 'store_id', None)
+            purchase_order = serializer.validated_data.get('purchase_order', serializer.instance.purchase_order)
+            grn = serializer.validated_data.get('grn', serializer.instance.grn)
+            if purchase_order and target_store_id and purchase_order.store_id != target_store_id:
+                raise ValidationError({"purchase_order": "Purchase order belongs to a different store."})
+            if grn and target_store_id and grn.store_id != target_store_id:
+                raise ValidationError({"grn": "GRN belongs to a different store."})
+
             invoice = serializer.save()
             invoice.calculate_totals()
             invoice.save(update_fields=['subtotal', 'discount_total', 'tax_total', 'grand_total', 'updated_at'])
@@ -805,16 +886,37 @@ class SupplierInvoiceItemViewSet(viewsets.ModelViewSet):
     serializer_class = SupplierInvoiceItemSerializer
     permission_classes = [IsAuthenticated, IsManagerUser]
 
-    def get_queryset(self):
+    def _get_scoped_invoice(self):
         invoice_id = self.kwargs.get('invoice_pk')
-        if invoice_id:
-            return SupplierInvoiceItem.objects.filter(invoice_id=invoice_id)
-        return SupplierInvoiceItem.objects.none()
+        if not invoice_id:
+            raise NotFound("Supplier invoice not found.")
+        invoice = self._scoped_invoice_queryset().filter(id=invoice_id).first()
+        if not invoice:
+            raise NotFound("Supplier invoice not found.")
+        return invoice
+
+    def _scoped_invoice_queryset(self):
+        user = self.request.user
+        if _is_global_admin(user):
+            return SupplierInvoice.objects.all()
+        user_store_id = getattr(user, 'store_id', None)
+        if not user_store_id:
+            return SupplierInvoice.objects.none()
+        return SupplierInvoice.objects.filter(
+            Q(store_id=user_store_id) |
+            Q(store__isnull=True, created_by=user)
+        )
+
+    def get_queryset(self):
+        try:
+            invoice = self._get_scoped_invoice()
+        except NotFound:
+            return SupplierInvoiceItem.objects.none()
+        return SupplierInvoiceItem.objects.filter(invoice=invoice)
 
     def perform_create(self, serializer):
-        invoice_id = self.kwargs.get('invoice_pk')
-        invoice = SupplierInvoice.objects.get(id=invoice_id)
-        item = serializer.save(invoice_id=invoice_id)
+        invoice = self._get_scoped_invoice()
+        item = serializer.save(invoice=invoice)
         invoice.calculate_totals()
         invoice.save(update_fields=['subtotal', 'discount_total', 'tax_total', 'grand_total', 'updated_at'])
         AuditLog.objects.create(
@@ -827,6 +929,9 @@ class SupplierInvoiceItemViewSet(viewsets.ModelViewSet):
         )
 
     def perform_update(self, serializer):
+        existing_invoice = serializer.instance.invoice
+        if not self._scoped_invoice_queryset().filter(id=existing_invoice.id).exists():
+            raise NotFound("Supplier invoice item not found.")
         item = serializer.save()
         invoice = item.invoice
         invoice.calculate_totals()
@@ -842,6 +947,8 @@ class SupplierInvoiceItemViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         invoice = instance.invoice
+        if not self._scoped_invoice_queryset().filter(id=invoice.id).exists():
+            raise NotFound("Supplier invoice item not found.")
         AuditLog.objects.create(
             user=self.request.user,
             action='delete',
@@ -872,16 +979,16 @@ class SupplierPaymentViewSet(viewsets.ModelViewSet):
         if role not in ['admin', 'manager', 'cashier']:
             return SupplierPayment.objects.none()
         include_inactive = str(self.request.query_params.get('include_inactive', 'false')).lower() == 'true'
-        if role == 'admin':
+        if _is_global_admin(user):
             qs = SupplierPayment.objects.all()
         else:
-            if not getattr(user, 'store', None):
+            user_store_id = getattr(user, 'store_id', None)
+            if not user_store_id:
                 return SupplierPayment.objects.none()
-            # For managers/cashiers, show store-scoped PO and invoice payments.
             qs = SupplierPayment.objects.filter(
-                Q(purchase_order__store=user.store) |
-                Q(supplier_invoice__store=user.store) |
-                Q(purchase_order__isnull=True, created_by=user)
+                Q(purchase_order__store_id=user_store_id) |
+                Q(supplier_invoice__store_id=user_store_id) |
+                Q(purchase_order__isnull=True, supplier_invoice__isnull=True, created_by=user)
             )
         if not include_inactive:
             qs = qs.filter(is_active=True)
@@ -889,7 +996,15 @@ class SupplierPaymentViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         with transaction.atomic():
+            purchase_order = serializer.validated_data.get('purchase_order')
             invoice = serializer.validated_data.get('supplier_invoice')
+            if purchase_order:
+                _assert_user_store_access(self.request.user, purchase_order.store_id, field_name='purchase_order')
+            if invoice:
+                _assert_user_store_access(self.request.user, invoice.store_id, field_name='supplier_invoice')
+            if purchase_order and invoice and purchase_order.store_id and invoice.store_id and purchase_order.store_id != invoice.store_id:
+                raise ValidationError({"detail": "purchase_order and supplier_invoice must belong to the same store."})
+
             payment_status = serializer.validated_data.get('status')
             amount = _to_decimal(serializer.validated_data.get('amount', 0))
             if invoice and payment_status == 'completed':
@@ -924,9 +1039,17 @@ class SupplierPaymentViewSet(viewsets.ModelViewSet):
             old_po = old_payment.purchase_order
             old_invoice = old_payment.supplier_invoice
 
+            new_po = serializer.validated_data.get('purchase_order', old_po)
             new_invoice = serializer.validated_data.get('supplier_invoice', old_invoice)
             new_status = serializer.validated_data.get('status', old_payment.status)
             new_amount = _to_decimal(serializer.validated_data.get('amount', old_payment.amount))
+
+            if new_po:
+                _assert_user_store_access(self.request.user, new_po.store_id, field_name='purchase_order')
+            if new_invoice:
+                _assert_user_store_access(self.request.user, new_invoice.store_id, field_name='supplier_invoice')
+            if new_po and new_invoice and new_po.store_id and new_invoice.store_id and new_po.store_id != new_invoice.store_id:
+                raise ValidationError({"detail": "purchase_order and supplier_invoice must belong to the same store."})
             if new_invoice and new_status == 'completed':
                 _validate_invoice_payment_limit(new_invoice, new_amount, exclude_payment_id=old_payment.id)
 

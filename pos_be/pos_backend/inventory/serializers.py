@@ -96,10 +96,13 @@ class ProductSerializer(serializers.ModelSerializer):
         if not request or not hasattr(request, 'user') or not request.user.is_authenticated:
             return None
 
+        user_store_id = getattr(request.user, 'store_id', None)
+        if user_store_id:
+            return user_store_id
+
         if request.user.role == 'admin':
-            # Default store-admin views to their own store unless an explicit store is requested.
-            return request.query_params.get('store') or getattr(request.user, 'store_id', None)
-        return getattr(request.user, 'store_id', None)
+            return request.query_params.get('store')
+        return None
 
     def get_stock_details(self, obj):
         stock_qs = StockLevel.objects.filter(product=obj).select_related('store')
